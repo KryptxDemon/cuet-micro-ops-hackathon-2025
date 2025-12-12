@@ -60,7 +60,7 @@ class S3Service {
       });
       this.isConfigured = true;
       console.log(
-        `[S3Service] Initialized with bucket: ${config.bucketName}, endpoint: ${config.endpoint || "AWS S3"}`,
+        `[S3Service] Initialized with bucket: ${config.bucketName}, endpoint: ${config.endpoint ?? "AWS S3"}`,
       );
     } else {
       this.isConfigured = false;
@@ -96,7 +96,7 @@ class S3Service {
 
     // If not configured, return mock result
     if (!this.isS3Configured()) {
-      console.log(`[S3Service] Mock upload for file ${fileId}`);
+      console.log(`[S3Service] Mock upload for file ${String(fileId)}`);
       return {
         s3Key,
         size: Math.floor(Math.random() * 10000000) + 1000,
@@ -105,9 +105,9 @@ class S3Service {
 
     // Create mock content if not provided
     const fileContent =
-      content ||
+      content ??
       Buffer.from(
-        `Mock download content for file ID: ${fileId}\n` +
+        `Mock download content for file ID: ${String(fileId)}\n` +
           `Generated at: ${new Date().toISOString()}\n` +
           `This is a simulated file for the hackathon challenge.\n`,
       );
@@ -129,14 +129,18 @@ class S3Service {
         },
       });
 
-      await this.client!.send(command);
+      if (!this.client) throw new Error("S3 client not initialized");
+      await this.client.send(command);
       console.log(
-        `[S3Service] Uploaded file ${fileId} to ${s3Key} (${size} bytes)`,
+        `[S3Service] Uploaded file ${String(fileId)} to ${s3Key} (${String(size)} bytes)`,
       );
 
       return { s3Key, size };
     } catch (error) {
-      console.error(`[S3Service] Failed to upload file ${fileId}:`, error);
+      console.error(
+        `[S3Service] Failed to upload file ${String(fileId)}:`,
+        error,
+      );
       throw new Error(`S3 upload failed: ${(error as Error).message}`);
     }
   }
@@ -150,7 +154,8 @@ class S3Service {
   ): Promise<string> {
     // If not configured, return mock URL
     if (!this.isS3Configured()) {
-      const mockUrl = `https://mock-s3.example.com/${this.bucketName || "downloads"}/${s3Key}?token=${crypto.randomUUID()}&expires=${Date.now() + expiresIn * 1000}`;
+      const bucketName = this.bucketName || "downloads";
+      const mockUrl = `https://mock-s3.example.com/${bucketName}/${s3Key}?token=${crypto.randomUUID()}&expires=${String(Date.now() + expiresIn * 1000)}`;
       console.log(`[S3Service] Generated mock presigned URL for ${s3Key}`);
       return mockUrl;
     }
@@ -161,9 +166,10 @@ class S3Service {
         Key: s3Key,
       });
 
-      const url = await getSignedUrl(this.client!, command, { expiresIn });
+      if (!this.client) throw new Error("S3 client not initialized");
+      const url = await getSignedUrl(this.client, command, { expiresIn });
       console.log(
-        `[S3Service] Generated presigned URL for ${s3Key} (expires in ${expiresIn}s)`,
+        `[S3Service] Generated presigned URL for ${s3Key} (expires in ${String(expiresIn)}s)`,
       );
       return url;
     } catch (error) {
@@ -171,7 +177,9 @@ class S3Service {
         `[S3Service] Failed to generate presigned URL for ${s3Key}:`,
         error,
       );
-      throw new Error(`Failed to generate download URL: ${(error as Error).message}`);
+      throw new Error(
+        `Failed to generate download URL: ${(error as Error).message}`,
+      );
     }
   }
 
@@ -184,13 +192,15 @@ class S3Service {
     // If not configured, return mock result based on file ID pattern
     if (!this.isS3Configured()) {
       // Mock: files with IDs divisible by 7 exist
-      const fileIdMatch = s3Key.match(/\/(\d+)\.zip$/);
+      const fileIdMatch = /\/(\d+)\.zip$/.exec(s3Key);
       if (fileIdMatch) {
         const fileId = parseInt(fileIdMatch[1], 10);
         const exists = fileId % 7 === 0;
         return {
           exists,
-          size: exists ? Math.floor(Math.random() * 10000000) + 1000 : undefined,
+          size: exists
+            ? Math.floor(Math.random() * 10000000) + 1000
+            : undefined,
         };
       }
       return { exists: false };
@@ -202,7 +212,8 @@ class S3Service {
         Key: s3Key,
       });
 
-      const response = await this.client!.send(command);
+      if (!this.client) throw new Error("S3 client not initialized");
+      const response = await this.client.send(command);
       return {
         exists: true,
         size: response.ContentLength,
@@ -228,7 +239,8 @@ class S3Service {
         Bucket: this.bucketName,
         Key: "__health_check_marker__",
       });
-      await this.client!.send(command);
+      if (!this.client) throw new Error("S3 client not initialized");
+      await this.client.send(command);
       return true;
     } catch (error) {
       // NotFound is fine - bucket is accessible

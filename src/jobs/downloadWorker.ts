@@ -10,9 +10,10 @@
  * Connects: queue.ts + jobStore.ts + s3Service.ts
  */
 
-import { downloadQueue, type QueueJob } from "./queue.ts";
-import { jobStore } from "../utils/jobStore.ts";
 import { s3Service } from "../services/s3Service.ts";
+import { jobStore } from "../utils/jobStore.ts";
+import { downloadQueue } from "./queue.ts";
+import type { QueueJob } from "./queue.ts";
 
 // Simulated processing time per file (1-3 seconds)
 const MIN_PROCESS_TIME = 1000;
@@ -68,26 +69,24 @@ async function processDownloadJob(queueJob: QueueJob): Promise<void> {
 
   const totalFiles = fileIds.length;
   const processedS3Keys: string[] = [];
-  let totalSize = 0;
 
   try {
     // Process each file
     for (let i = 0; i < totalFiles; i++) {
       const fileId = fileIds[i];
       console.log(
-        `[Worker] Job ${jobId}: Processing file ${fileId} (${i + 1}/${totalFiles})`,
+        `[Worker] Job ${jobId}: Processing file ${String(fileId)} (${String(i + 1)}/${String(totalFiles)})`,
       );
 
       // Process the file
-      const { s3Key, size } = await processFile(fileId);
+      const { s3Key } = await processFile(fileId);
       processedS3Keys.push(s3Key);
-      totalSize += size;
 
       // Update progress
       const progress = Math.round(((i + 1) / totalFiles) * 100);
       jobStore.updateJob(jobId, { progress });
 
-      console.log(`[Worker] Job ${jobId}: Progress ${progress}%`);
+      console.log(`[Worker] Job ${jobId}: Progress ${String(progress)}%`);
     }
 
     // All files processed - generate final download URL
@@ -141,12 +140,14 @@ export function initializeWorker(): void {
     console.log(`[Worker] Event: Job ${job.jobId} completed`);
   });
 
-  downloadQueue.on("job:failed", (job: QueueJob, error: Error) => {
-    console.error(`[Worker] Event: Job ${job.jobId} failed -`, error.message);
+  downloadQueue.on("job:failed", (job: QueueJob) => {
+    console.error(`[Worker] Event: Job ${job.jobId} failed`);
   });
 
-  downloadQueue.on("job:retry", (job: QueueJob, error: Error) => {
-    console.log(`[Worker] Event: Retrying job ${job.jobId} (attempt ${job.attempts})`);
+  downloadQueue.on("job:retry", (job: QueueJob) => {
+    console.log(
+      `[Worker] Event: Retrying job ${job.jobId} (attempt ${String(job.attempts)})`,
+    );
   });
 
   console.log("[Worker] Download worker initialized and listening for jobs");
@@ -156,7 +157,10 @@ export function initializeWorker(): void {
  * Add a new download job to the queue
  * This is called by the API routes
  */
-export async function queueDownloadJob(jobId: string, fileIds: number[]): Promise<void> {
+export async function queueDownloadJob(
+  jobId: string,
+  fileIds: number[],
+): Promise<void> {
   // Create job in store first
   jobStore.createJob({ jobId, fileIds });
 
@@ -164,7 +168,7 @@ export async function queueDownloadJob(jobId: string, fileIds: number[]): Promis
   await downloadQueue.add(jobId, fileIds);
 
   console.log(
-    `[Worker] Queued job ${jobId} with ${fileIds.length} file(s)`,
+    `[Worker] Queued job ${jobId} with ${String(fileIds.length)} file(s)`,
   );
 }
 

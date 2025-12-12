@@ -13,8 +13,8 @@
  */
 
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
-import { jobStore } from "../utils/jobStore.ts";
 import { queueDownloadJob, getQueueStats } from "../jobs/downloadWorker.ts";
+import { jobStore } from "../utils/jobStore.ts";
 
 // Create a new Hono app for async download routes
 const asyncDownloadRoutes = new OpenAPIHono();
@@ -33,10 +33,13 @@ const AsyncDownloadRequestSchema = z
 
 const AsyncDownloadResponseSchema = z
   .object({
-    jobId: z.string().uuid().openapi({ description: "Unique job identifier" }),
+    jobId: z.uuid().openapi({ description: "Unique job identifier" }),
     status: z.enum(["queued"]).openapi({ description: "Initial job status" }),
     message: z.string().openapi({ description: "Status message" }),
-    totalFiles: z.number().int().openapi({ description: "Number of files to process" }),
+    totalFiles: z
+      .number()
+      .int()
+      .openapi({ description: "Number of files to process" }),
     statusUrl: z.string().openapi({ description: "URL to poll for status" }),
   })
   .openapi("AsyncDownloadResponse");
@@ -137,13 +140,16 @@ asyncDownloadRoutes.openapi(asyncDownloadRoute, async (c) => {
   // Queue the job (creates in store + adds to queue)
   await queueDownloadJob(jobId, file_ids);
 
-  console.log(`[AsyncDownload] Job ${jobId} queued with ${file_ids.length} files`);
+  console.log(
+    `[AsyncDownload] Job ${jobId} queued with ${String(file_ids.length)} files`,
+  );
 
   return c.json(
     {
       jobId,
       status: "queued" as const,
-      message: "Download job queued successfully. Poll the status URL for progress.",
+      message:
+        "Download job queued successfully. Poll the status URL for progress.",
       totalFiles: file_ids.length,
       statusUrl: `/v1/download/status/${jobId}`,
     },
@@ -165,7 +171,7 @@ const jobStatusRoute = createRoute({
     Recommended polling interval: 2-5 seconds.`,
   request: {
     params: z.object({
-      jobId: z.string().uuid().openapi({ description: "Job ID from async download" }),
+      jobId: z.uuid().openapi({ description: "Job ID from async download" }),
     }),
   },
   responses: {
@@ -227,7 +233,8 @@ const queueStatsRoute = createRoute({
   path: "/v1/download/queue/stats",
   tags: ["Async Download"],
   summary: "Get queue statistics",
-  description: "Returns current queue size, active jobs, and job counts by status.",
+  description:
+    "Returns current queue size, active jobs, and job counts by status.",
   responses: {
     200: {
       description: "Queue statistics",

@@ -55,7 +55,7 @@ class SimpleQueue extends EventEmitter {
 
     this.queue.push(job);
     console.log(
-      `[Queue] Added job ${jobId} to queue. Queue size: ${this.queue.length}`,
+      `[Queue] Added job ${jobId} to queue. Queue size: ${String(this.queue.length)}`,
     );
 
     // Emit event for new job
@@ -63,6 +63,7 @@ class SimpleQueue extends EventEmitter {
 
     // Try to process if we have capacity
     this.tryProcess();
+    return await Promise.resolve(job);
 
     return job;
   }
@@ -91,7 +92,7 @@ class SimpleQueue extends EventEmitter {
     while (this.activeJobs < this.concurrency && this.queue.length > 0) {
       const job = this.queue.shift();
       if (job) {
-        this.processJob(job);
+        void this.processJob(job);
       }
     }
   }
@@ -106,7 +107,7 @@ class SimpleQueue extends EventEmitter {
     job.attempts++;
 
     console.log(
-      `[Queue] Processing job ${job.jobId} (attempt ${job.attempts}/${this.maxRetries})`,
+      `[Queue] Processing job ${job.jobId} (attempt ${String(job.attempts)}/${String(this.maxRetries)})`,
     );
     this.emit("job:processing", job);
 
@@ -124,7 +125,7 @@ class SimpleQueue extends EventEmitter {
         this.emit("job:retry", job, error);
       } else {
         console.error(
-          `[Queue] Job ${job.jobId} failed after ${this.maxRetries} attempts`,
+          `[Queue] Job ${job.jobId} failed after ${String(this.maxRetries)} attempts`,
         );
         this.emit("job:failed", job, error);
       }
@@ -182,7 +183,9 @@ class SimpleQueue extends EventEmitter {
     this.isRunning = false;
     const pendingJobs = this.queue.length;
     this.queue = [];
-    console.log(`[Queue] Queue stopped. Cleared ${pendingJobs} pending jobs`);
+    console.log(
+      `[Queue] Queue stopped. Cleared ${String(pendingJobs)} pending jobs`,
+    );
     this.emit("queue:stopped");
   }
 
@@ -215,7 +218,7 @@ class SimpleQueue extends EventEmitter {
     while (this.activeJobs > 0) {
       if (Date.now() - startTime > timeoutMs) {
         console.warn(
-          `[Queue] Shutdown timeout reached with ${this.activeJobs} active jobs`,
+          `[Queue] Shutdown timeout reached with ${String(this.activeJobs)} active jobs`,
         );
         break;
       }

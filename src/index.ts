@@ -15,9 +15,9 @@ import { timeout } from "hono/timeout";
 import { rateLimiter } from "hono-rate-limiter";
 
 // Async download system imports
-import { s3Service } from "./services/s3Service.ts";
 import { initializeWorker, shutdownWorker } from "./jobs/downloadWorker.ts";
 import { asyncDownloadRoutes } from "./routes/download.ts";
+import { s3Service } from "./services/s3Service.ts";
 
 // Helper for optional URL that treats empty string as undefined
 const optionalUrl = z

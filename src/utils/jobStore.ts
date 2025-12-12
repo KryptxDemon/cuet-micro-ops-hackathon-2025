@@ -47,7 +47,7 @@ export interface UpdateJobInput {
  * Uses a Map for O(1) lookups by jobId
  */
 class JobStore {
-  private jobs: Map<string, Job> = new Map();
+  private jobs = new Map<string, Job>();
 
   /**
    * Create a new job
@@ -65,7 +65,7 @@ class JobStore {
 
     this.jobs.set(input.jobId, job);
     console.log(
-      `[JobStore] Created job ${input.jobId} with ${input.fileIds.length} files`,
+      `[JobStore] Created job ${input.jobId} with ${String(input.fileIds.length)} files`,
     );
     return job;
   }
@@ -96,7 +96,7 @@ class JobStore {
 
     this.jobs.set(jobId, updatedJob);
     console.log(
-      `[JobStore] Updated job ${jobId}: status=${updatedJob.status}, progress=${updatedJob.progress}%`,
+      `[JobStore] Updated job ${jobId}: status=${updatedJob.status}, progress=${String(updatedJob.progress)}%`,
     );
     return updatedJob;
   }
@@ -123,7 +123,9 @@ class JobStore {
    * Get jobs by status
    */
   getJobsByStatus(status: JobStatus): Job[] {
-    return Array.from(this.jobs.values()).filter((job) => job.status === status);
+    return Array.from(this.jobs.values()).filter(
+      (job) => job.status === status,
+    );
   }
 
   /**
@@ -151,13 +153,14 @@ class JobStore {
     failed: number;
   } {
     const jobs = this.getAllJobs();
-    return {
+    const stats = {
       total: jobs.length,
       queued: jobs.filter((j) => j.status === "queued").length,
       processing: jobs.filter((j) => j.status === "processing").length,
       ready: jobs.filter((j) => j.status === "ready").length,
       failed: jobs.filter((j) => j.status === "failed").length,
     };
+    return stats;
   }
 
   /**
@@ -186,7 +189,7 @@ class JobStore {
     }
 
     if (cleaned > 0) {
-      console.log(`[JobStore] Cleaned up ${cleaned} old jobs`);
+      console.log(`[JobStore] Cleaned up ${String(cleaned)} old jobs`);
     }
     return cleaned;
   }
