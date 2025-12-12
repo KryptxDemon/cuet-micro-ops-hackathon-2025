@@ -81,7 +81,7 @@ async function processDownloadJob(queueJob: QueueJob): Promise<void> {
 
     for (let i = 0; i < totalFiles; i += PARALLEL_FILE_BATCH_SIZE) {
       const batch = fileIds.slice(i, i + PARALLEL_FILE_BATCH_SIZE);
-      
+
       console.log(
         `[Worker] Job ${jobId}: Processing batch of ${String(batch.length)} files (${String(i + 1)}-${String(Math.min(i + batch.length, totalFiles))}/${String(totalFiles)})`,
       );
@@ -91,7 +91,7 @@ async function processDownloadJob(queueJob: QueueJob): Promise<void> {
         batch.map(async (fileId) => {
           const { s3Key } = await processFile(fileId);
           return s3Key;
-        })
+        }),
       );
 
       processedS3Keys.push(...batchResults);

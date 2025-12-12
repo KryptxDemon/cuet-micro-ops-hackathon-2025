@@ -5,29 +5,34 @@ A React dashboard application demonstrating end-to-end observability with **Sent
 ## 🎯 Features
 
 ### Health Monitoring
+
 - Real-time API health status
 - S3 storage connectivity check
 - Auto-refresh every 30 seconds
 
 ### Download Job Management
+
 - Initiate file downloads with tracing
 - Track job progress (pending → checking → downloading → completed)
 - View download URLs when complete
 - Error handling with trace context
 
 ### Error Tracking (Sentry)
+
 - Automatic error capture with stack traces
 - React Error Boundary integration
 - User feedback dialog
 - Custom error logging with trace IDs
 
 ### Distributed Tracing (OpenTelemetry)
+
 - Automatic instrumentation for fetch/XHR
 - W3C Trace Context propagation (traceparent headers)
 - Current trace ID display
 - Direct links to Jaeger UI
 
 ### Performance Metrics
+
 - Total request count
 - Success/failure rates
 - Average response times
@@ -36,6 +41,7 @@ A React dashboard application demonstrating end-to-end observability with **Sent
 ## 🚀 Quick Start
 
 ### Prerequisites
+
 - Node.js 24+
 - Backend API running on port 3000
 - Jaeger running on port 16686 (optional for tracing)
@@ -72,12 +78,12 @@ open http://localhost:5173
 
 ### Environment Variables
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `VITE_API_URL` | Backend API URL | `http://localhost:3000` |
-| `VITE_JAEGER_URL` | Jaeger UI URL | `http://localhost:16686` |
-| `VITE_OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP endpoint for traces | `http://localhost:4318` |
-| `VITE_SENTRY_DSN` | Sentry DSN (optional) | - |
+| Variable                           | Description              | Default                  |
+| ---------------------------------- | ------------------------ | ------------------------ |
+| `VITE_API_URL`                     | Backend API URL          | `http://localhost:3000`  |
+| `VITE_JAEGER_URL`                  | Jaeger UI URL            | `http://localhost:16686` |
+| `VITE_OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP endpoint for traces | `http://localhost:4318`  |
+| `VITE_SENTRY_DSN`                  | Sentry DSN (optional)    | -                        |
 
 ### Sentry Setup (Optional)
 
@@ -164,28 +170,31 @@ frontend/
 
 ## 📊 Dashboard Components
 
-| Component | Description |
-|-----------|-------------|
-| `HealthStatus` | API/storage health with auto-refresh |
-| `DownloadJobs` | File download management with progress |
-| `ErrorLog` | Recent errors with trace IDs |
-| `TraceViewer` | Current trace ID + Jaeger links |
-| `PerformanceMetrics` | Request stats and response times |
+| Component            | Description                            |
+| -------------------- | -------------------------------------- |
+| `HealthStatus`       | API/storage health with auto-refresh   |
+| `DownloadJobs`       | File download management with progress |
+| `ErrorLog`           | Recent errors with trace IDs           |
+| `TraceViewer`        | Current trace ID + Jaeger links        |
+| `PerformanceMetrics` | Request stats and response times       |
 
 ## 🧪 Testing Observability
 
 ### Test Error Tracking
+
 1. Click "Test Error" button in Error Log card
 2. Check Sentry dashboard for the error
 3. Note the trace ID linking to Jaeger
 
 ### Test Distributed Tracing
+
 1. Initiate a download (e.g., Files 1-3)
 2. Note the trace ID in Trace Viewer
 3. Click "View Current Trace" to see in Jaeger
 4. Observe spans: frontend → API → storage
 
 ### Test Health Monitoring
+
 1. Stop MinIO container: `docker stop delineate-minio`
 2. Refresh health status
 3. Observe storage check failure

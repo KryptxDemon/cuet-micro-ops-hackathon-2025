@@ -175,7 +175,7 @@ const BatchDownloadRequestSchema = z
             .array(z.number().int().min(10000).max(100000000))
             .min(1)
             .max(1000),
-        })
+        }),
       )
       .min(1)
       .max(10)
@@ -191,7 +191,7 @@ const BatchDownloadResponseSchema = z
         status: z.string(),
         totalFiles: z.number(),
         statusUrl: z.string(),
-      })
+      }),
     ),
     message: z.string(),
   })
@@ -240,7 +240,7 @@ asyncDownloadRoutes.openapi(batchDownloadRoute, async (c) => {
         totalFiles: req.file_ids.length,
         statusUrl: `/v1/download/status/${jobId}`,
       };
-    })
+    }),
   );
 
   console.log(

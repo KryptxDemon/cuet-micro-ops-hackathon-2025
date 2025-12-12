@@ -8,18 +8,18 @@
  * - Integration with OpenTelemetry traces
  */
 
-import * as Sentry from '@sentry/react';
+import * as Sentry from "@sentry/react";
 
 // Configuration
-const SENTRY_DSN = import.meta.env.VITE_SENTRY_DSN || '';
-const ENVIRONMENT = import.meta.env.MODE || 'development';
+const SENTRY_DSN = import.meta.env.VITE_SENTRY_DSN || "";
+const ENVIRONMENT = import.meta.env.MODE || "development";
 
 /**
  * Initialize Sentry
  */
 export function initSentry() {
   if (!SENTRY_DSN) {
-    console.warn('[Sentry] No DSN provided, Sentry will not be initialized');
+    console.warn("[Sentry] No DSN provided, Sentry will not be initialized");
     return;
   }
 
@@ -30,9 +30,9 @@ export function initSentry() {
     // Performance Monitoring
     tracesSampleRate: 1.0, // Capture 100% of transactions for development
     tracePropagationTargets: [
-      'localhost',
+      "localhost",
       /^\//,
-      new RegExp(import.meta.env.VITE_API_URL || 'localhost'),
+      new RegExp(import.meta.env.VITE_API_URL || "localhost"),
     ],
 
     // Session Replay
@@ -40,7 +40,7 @@ export function initSentry() {
     replaysOnErrorSampleRate: 1.0, // 100% of sessions with errors
 
     // Release tracking
-    release: `delineate-frontend@${import.meta.env.VITE_APP_VERSION || '1.0.0'}`,
+    release: `delineate-frontend@${import.meta.env.VITE_APP_VERSION || "1.0.0"}`,
 
     // Integrations
     integrations: [
@@ -50,12 +50,12 @@ export function initSentry() {
         blockAllMedia: false,
       }),
       Sentry.feedbackIntegration({
-        colorScheme: 'system',
+        colorScheme: "system",
         showBranding: false,
-        buttonLabel: 'Report a Bug',
-        submitButtonLabel: 'Send Feedback',
-        formTitle: 'Report an Issue',
-        messagePlaceholder: 'Describe what happened...',
+        buttonLabel: "Report a Bug",
+        submitButtonLabel: "Send Feedback",
+        formTitle: "Report an Issue",
+        messagePlaceholder: "Describe what happened...",
       }),
     ],
 
@@ -71,7 +71,7 @@ export function initSentry() {
     },
   });
 
-  console.log('[Sentry] Initialized successfully');
+  console.log("[Sentry] Initialized successfully");
 }
 
 /**
@@ -85,7 +85,7 @@ export function initSentry() {
 export function captureException(error, context) {
   Sentry.withScope((scope) => {
     if (context?.traceId) {
-      scope.setTag('trace_id', context.traceId);
+      scope.setTag("trace_id", context.traceId);
     }
 
     if (context?.tags) {
@@ -112,10 +112,10 @@ export function captureException(error, context) {
  * @param {string} [context.traceId]
  * @param {Object} [context.tags]
  */
-export function captureMessage(message, level = 'info', context) {
+export function captureMessage(message, level = "info", context) {
   Sentry.withScope((scope) => {
     if (context?.traceId) {
-      scope.setTag('trace_id', context.traceId);
+      scope.setTag("trace_id", context.traceId);
     }
 
     if (context?.tags) {
@@ -160,13 +160,16 @@ export function addBreadcrumb(breadcrumb) {
 export function showFeedbackDialog() {
   const feedback = Sentry.getFeedback();
   if (feedback) {
-    feedback.createForm().then((form) => {
-      if (form) {
-        form.appendToDom();
-      }
-    }).catch((err) => {
-      console.warn('[Sentry] Failed to create feedback form:', err);
-    });
+    feedback
+      .createForm()
+      .then((form) => {
+        if (form) {
+          form.appendToDom();
+        }
+      })
+      .catch((err) => {
+        console.warn("[Sentry] Failed to create feedback form:", err);
+      });
   }
 }
 

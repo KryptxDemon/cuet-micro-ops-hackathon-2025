@@ -1,25 +1,24 @@
-import { WebTracerProvider } from '@opentelemetry/sdk-trace-web';
-import { BatchSpanProcessor } from '@opentelemetry/sdk-trace-base';
-import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
-import { ZoneContextManager } from '@opentelemetry/context-zone';
-import { registerInstrumentations } from '@opentelemetry/instrumentation';
-import { FetchInstrumentation } from '@opentelemetry/instrumentation-fetch';
-import { XMLHttpRequestInstrumentation } from '@opentelemetry/instrumentation-xml-http-request';
-import { DocumentLoadInstrumentation } from '@opentelemetry/instrumentation-document-load';
-import { UserInteractionInstrumentation } from '@opentelemetry/instrumentation-user-interaction';
-import { Resource } from '@opentelemetry/resources';
+import { WebTracerProvider } from "@opentelemetry/sdk-trace-web";
+import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-base";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+import { ZoneContextManager } from "@opentelemetry/context-zone";
+import { registerInstrumentations } from "@opentelemetry/instrumentation";
+import { FetchInstrumentation } from "@opentelemetry/instrumentation-fetch";
+import { XMLHttpRequestInstrumentation } from "@opentelemetry/instrumentation-xml-http-request";
+import { DocumentLoadInstrumentation } from "@opentelemetry/instrumentation-document-load";
+import { UserInteractionInstrumentation } from "@opentelemetry/instrumentation-user-interaction";
+import { Resource } from "@opentelemetry/resources";
 import {
   ATTR_SERVICE_NAME,
   ATTR_SERVICE_VERSION,
-} from '@opentelemetry/semantic-conventions';
-import { trace, context, SpanStatusCode } from '@opentelemetry/api';
+} from "@opentelemetry/semantic-conventions";
+import { trace, context, SpanStatusCode } from "@opentelemetry/api";
 
 // Configuration
 const OTEL_ENDPOINT =
-  import.meta.env.VITE_OTEL_EXPORTER_OTLP_ENDPOINT ||
-  'http://localhost:4318';
-const SERVICE_NAME = 'delineate-frontend';
-const SERVICE_VERSION = '1.0.0';
+  import.meta.env.VITE_OTEL_EXPORTER_OTLP_ENDPOINT || "http://localhost:4318";
+const SERVICE_NAME = "delineate-frontend";
+const SERVICE_VERSION = "1.0.0";
 
 // Create resource
 const resource = new Resource({
@@ -29,13 +28,13 @@ const resource = new Resource({
 
 // Create exporter with error handling - disable credentials for CORS compatibility
 const exporter = new OTLPTraceExporter({
-  url: OTEL_ENDPOINT + '/v1/traces',
+  url: OTEL_ENDPOINT + "/v1/traces",
   headers: {},
   // Use fetch without credentials to avoid CORS issues with wildcard origin
   fetchImplementation: (url, options) => {
     return fetch(url, {
       ...options,
-      credentials: 'omit', // Don't send credentials - allows wildcard CORS
+      credentials: "omit", // Don't send credentials - allows wildcard CORS
     });
   },
 });
@@ -46,12 +45,14 @@ const provider = new WebTracerProvider({
 });
 
 // Add span processor with error handling
-provider.addSpanProcessor(new BatchSpanProcessor(exporter, {
-  // Export spans every 5 seconds or when buffer reaches 512 spans
-  scheduledDelayMillis: 5000,
-  maxQueueSize: 2048,
-  maxExportBatchSize: 512,
-}));
+provider.addSpanProcessor(
+  new BatchSpanProcessor(exporter, {
+    // Export spans every 5 seconds or when buffer reaches 512 spans
+    scheduledDelayMillis: 5000,
+    maxQueueSize: 2048,
+    maxExportBatchSize: 512,
+  }),
+);
 
 // Set context manager for zone.js integration
 provider.register({
@@ -66,7 +67,7 @@ registerInstrumentations({
       propagateTraceHeaderCorsUrls: [
         /localhost:3000/,
         /localhost:5173\/api/,
-        new RegExp(import.meta.env.VITE_API_URL || 'localhost'),
+        new RegExp(import.meta.env.VITE_API_URL || "localhost"),
       ],
       // Clear timing data after recording
       clearTimingResources: true,
@@ -75,12 +76,12 @@ registerInstrumentations({
       propagateTraceHeaderCorsUrls: [
         /localhost:3000/,
         /localhost:5173\/api/,
-        new RegExp(import.meta.env.VITE_API_URL || 'localhost'),
+        new RegExp(import.meta.env.VITE_API_URL || "localhost"),
       ],
     }),
     new DocumentLoadInstrumentation(),
     new UserInteractionInstrumentation({
-      eventNames: ['click', 'submit'],
+      eventNames: ["click", "submit"],
     }),
   ],
 });
@@ -97,7 +98,7 @@ const tracer = trace.getTracer(SERVICE_NAME, SERVICE_VERSION);
 export function createSpan(name, attributes) {
   return tracer.startSpan(name, {
     attributes: {
-      'ui.component': 'dashboard',
+      "ui.component": "dashboard",
       ...attributes,
     },
   });
@@ -114,15 +115,16 @@ export async function withSpan(name, fn, attributes) {
   const span = createSpan(name, attributes);
 
   try {
-    const result = await context.with(trace.setSpan(context.active(), span), () =>
-      fn(span)
+    const result = await context.with(
+      trace.setSpan(context.active(), span),
+      () => fn(span),
     );
     span.setStatus({ code: SpanStatusCode.OK });
     return result;
   } catch (error) {
     span.setStatus({
       code: SpanStatusCode.ERROR,
-      message: error instanceof Error ? error.message : 'Unknown error',
+      message: error instanceof Error ? error.message : "Unknown error",
     });
     span.recordException(error);
     throw error;
@@ -170,8 +172,8 @@ export function addSpanAttributes(attributes) {
  * Called once at application startup
  */
 export function initTracing() {
-  console.log('[OpenTelemetry] Tracing initialized for', SERVICE_NAME);
-  console.log('[OpenTelemetry] OTLP endpoint:', OTEL_ENDPOINT);
+  console.log("[OpenTelemetry] Tracing initialized for", SERVICE_NAME);
+  console.log("[OpenTelemetry] OTLP endpoint:", OTEL_ENDPOINT);
 }
 
 export { tracer, provider };

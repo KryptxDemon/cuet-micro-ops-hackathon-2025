@@ -5,17 +5,17 @@
  * Errors are captured by Sentry with trace context.
  */
 
-import { withSpan, getCurrentTraceId, startTrace } from './tracing';
-import { captureException, addBreadcrumb } from './sentry';
+import { withSpan, getCurrentTraceId, startTrace } from "./tracing";
+import { captureException, addBreadcrumb } from "./sentry";
 
 // API Configuration
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
 
 // Error class with trace context
 export class ApiClientError extends Error {
   constructor(message, options = {}) {
     super(message);
-    this.name = 'ApiClientError';
+    this.name = "ApiClientError";
     this.traceId = options.traceId;
     this.statusCode = options.statusCode;
     this.endpoint = options.endpoint;
@@ -29,40 +29,43 @@ export class ApiClientError extends Error {
  * @returns {Promise<any>} Response data
  */
 async function apiRequest(endpoint, options = {}) {
-  const { span, traceId } = startTrace(`API ${options.method || 'GET'} ${endpoint}`);
+  const { span, traceId } = startTrace(
+    `API ${options.method || "GET"} ${endpoint}`,
+  );
 
   try {
     addBreadcrumb({
-      category: 'api',
-      message: `${options.method || 'GET'} ${endpoint}`,
-      level: 'info',
+      category: "api",
+      message: `${options.method || "GET"} ${endpoint}`,
+      level: "info",
       data: { traceId },
     });
 
     span.setAttributes({
-      'http.method': options.method || 'GET',
-      'http.url': `${API_BASE_URL}${endpoint}`,
-      'trace.id': traceId,
+      "http.method": options.method || "GET",
+      "http.url": `${API_BASE_URL}${endpoint}`,
+      "trace.id": traceId,
     });
 
     const response = await fetch(`${API_BASE_URL}${endpoint}`, {
       ...options,
       headers: {
-        'Content-Type': 'application/json',
-        'X-Trace-ID': traceId,
+        "Content-Type": "application/json",
+        "X-Trace-ID": traceId,
         ...options.headers,
       },
     });
 
     span.setAttributes({
-      'http.status_code': response.status,
-      'http.response_content_length': response.headers.get('content-length') || '0',
+      "http.status_code": response.status,
+      "http.response_content_length":
+        response.headers.get("content-length") || "0",
     });
 
     // Get request ID from response headers
-    const requestId = response.headers.get('X-Request-ID');
+    const requestId = response.headers.get("X-Request-ID");
     if (requestId) {
-      span.setAttributes({ 'http.request_id': requestId });
+      span.setAttributes({ "http.request_id": requestId });
     }
 
     if (!response.ok) {
@@ -78,7 +81,7 @@ async function apiRequest(endpoint, options = {}) {
     span.end();
     return data;
   } catch (error) {
-    span.setAttributes({ 'error': true });
+    span.setAttributes({ error: true });
     span.end();
 
     if (error instanceof ApiClientError) {
@@ -86,15 +89,15 @@ async function apiRequest(endpoint, options = {}) {
         traceId: error.traceId,
         tags: {
           endpoint: error.endpoint || endpoint,
-          status_code: String(error.statusCode || 'unknown'),
+          status_code: String(error.statusCode || "unknown"),
         },
       });
       throw error;
     }
 
     const apiError = new ApiClientError(
-      error instanceof Error ? error.message : 'Unknown error',
-      { traceId, endpoint }
+      error instanceof Error ? error.message : "Unknown error",
+      { traceId, endpoint },
     );
     captureException(apiError, { traceId });
     throw apiError;
@@ -110,8 +113,8 @@ export const api = {
    * @returns {Promise<{status: string, checks: {storage: string}}>}
    */
   async getHealth() {
-    return withSpan('api.health', async () => {
-      return apiRequest('/health');
+    return withSpan("api.health", async () => {
+      return apiRequest("/health");
     });
   },
 
@@ -122,14 +125,14 @@ export const api = {
    */
   async checkDownload(fileId) {
     return withSpan(
-      'api.download.check',
+      "api.download.check",
       async () => {
-        return apiRequest('/v1/download/check', {
-          method: 'POST',
+        return apiRequest("/v1/download/check", {
+          method: "POST",
           body: JSON.stringify({ file_id: fileId }),
         });
       },
-      { 'file.id': String(fileId) }
+      { "file.id": String(fileId) },
     );
   },
 
@@ -140,14 +143,14 @@ export const api = {
    */
   async initiateAsyncDownload(fileIds) {
     return withSpan(
-      'api.download.async',
+      "api.download.async",
       async () => {
-        return apiRequest('/v1/download/async', {
-          method: 'POST',
+        return apiRequest("/v1/download/async", {
+          method: "POST",
           body: JSON.stringify({ file_ids: fileIds }),
         });
       },
-      { 'files.count': String(fileIds.length) }
+      { "files.count": String(fileIds.length) },
     );
   },
 
@@ -158,13 +161,13 @@ export const api = {
    */
   async getJobStatus(jobId) {
     return withSpan(
-      'api.download.status',
+      "api.download.status",
       async () => {
         return apiRequest(`/v1/download/status/${jobId}`, {
-          method: 'GET',
+          method: "GET",
         });
       },
-      { 'job.id': jobId }
+      { "job.id": jobId },
     );
   },
 
@@ -176,24 +179,26 @@ export const api = {
    * @returns {EventSource}
    */
   subscribeToJob(jobId, onMessage, onError) {
-    const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-    const eventSource = new EventSource(`${API_BASE}/v1/download/subscribe/${jobId}`);
-    
+    const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3000";
+    const eventSource = new EventSource(
+      `${API_BASE}/v1/download/subscribe/${jobId}`,
+    );
+
     eventSource.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
         onMessage(data);
       } catch (e) {
-        console.error('[SSE] Failed to parse message:', e);
+        console.error("[SSE] Failed to parse message:", e);
       }
     };
-    
+
     eventSource.onerror = (error) => {
-      console.error('[SSE] Error:', error);
+      console.error("[SSE] Error:", error);
       if (onError) onError(error);
       eventSource.close();
     };
-    
+
     return eventSource;
   },
 
