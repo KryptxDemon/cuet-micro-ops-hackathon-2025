@@ -751,6 +751,145 @@ function TraceViewer({ currentTraceId, jaegerUrl }) {
 }
 
 // ============================================================================
+// Sentry Dashboard Component
+// ============================================================================
+
+function SentryDashboard({ onTriggerBackendError, onTriggerFrontendError, sentryUrl }) {
+  const [testResults, setTestResults] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const addTestResult = (type, success, message) => {
+    setTestResults(prev => [
+      { id: crypto.randomUUID(), type, success, message, timestamp: new Date() },
+      ...prev.slice(0, 4) // Keep last 5 results
+    ]);
+  };
+
+  const triggerBackendSentryTest = async () => {
+    setIsLoading(true);
+    try {
+      // Call backend endpoint with sentry_test=true to trigger error
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/v1/download/check/99999?sentry_test=true`);
+      if (!response.ok) {
+        addTestResult('backend', true, 'Backend Sentry error triggered successfully!');
+        onTriggerBackendError?.();
+      }
+    } catch (error) {
+      addTestResult('backend', true, 'Backend Sentry error triggered!');
+      onTriggerBackendError?.();
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const triggerFrontendSentryTest = () => {
+    try {
+      onTriggerFrontendError?.();
+      addTestResult('frontend', true, 'Frontend Sentry error captured!');
+    } catch (error) {
+      addTestResult('frontend', false, 'Failed to trigger frontend error');
+    }
+  };
+
+  return (
+    <div className="card animate-fade-in">
+      <div className="card-header">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-medium flex items-center gap-2">
+            <Bug className="h-4 w-4 text-pink-500" />
+            Sentry Error Tracking
+          </h3>
+          <a
+            href={sentryUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn-ghost btn-sm text-pink-500 hover:text-pink-400"
+          >
+            <ExternalLink className="h-3 w-3 mr-1" />
+            Dashboard
+          </a>
+        </div>
+      </div>
+      <div className="card-content space-y-4">
+        {/* Test Buttons */}
+        <div className="space-y-2">
+          <p className="text-xs text-muted-foreground font-medium">Trigger Test Errors</p>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={triggerBackendSentryTest}
+              disabled={isLoading}
+              className="btn-outline btn-sm flex items-center justify-center gap-2 border-red-500/50 hover:bg-red-500/10 hover:border-red-500 text-red-500"
+            >
+              {isLoading ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <Server className="h-3 w-3" />
+              )}
+              Backend Error
+            </button>
+            <button
+              onClick={triggerFrontendSentryTest}
+              className="btn-outline btn-sm flex items-center justify-center gap-2 border-orange-500/50 hover:bg-orange-500/10 hover:border-orange-500 text-orange-500"
+            >
+              <Activity className="h-3 w-3" />
+              Frontend Error
+            </button>
+          </div>
+        </div>
+
+        {/* Open Sentry Dashboard */}
+        <a
+          href={sentryUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="btn-primary w-full justify-center bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700"
+        >
+          <ExternalLink className="h-4 w-4 mr-2" />
+          Open Sentry Dashboard
+        </a>
+
+        {/* Test Results */}
+        {testResults.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground font-medium">Recent Tests</p>
+            <div className="space-y-1 max-h-24 overflow-y-auto scrollbar-thin">
+              {testResults.map((result) => (
+                <div
+                  key={result.id}
+                  className={`text-xs p-2 rounded-md flex items-center gap-2 ${
+                    result.success 
+                      ? 'bg-green-500/10 text-green-500' 
+                      : 'bg-red-500/10 text-red-500'
+                  }`}
+                >
+                  {result.success ? (
+                    <CheckCircle className="h-3 w-3 flex-shrink-0" />
+                  ) : (
+                    <XCircle className="h-3 w-3 flex-shrink-0" />
+                  )}
+                  <span className="truncate">{result.message}</span>
+                  <span className="text-[10px] text-muted-foreground ml-auto">
+                    {result.type}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Info */}
+        <div className="text-xs text-muted-foreground bg-gradient-to-r from-pink-500/10 to-purple-500/10 border border-pink-500/20 p-2 rounded-md">
+          <p className="flex items-center gap-1">
+            <span className="h-1.5 w-1.5 rounded-full bg-pink-500" />
+            Errors are automatically captured and sent to Sentry
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
 // Performance Metrics Component
 // ============================================================================
 
@@ -891,6 +1030,12 @@ function App() {
   });
 
   const jaegerUrl = import.meta.env.VITE_JAEGER_URL || 'http://localhost:16686';
+  
+  // Sentry Dashboard URL - Extract from DSN
+  const sentryDsn = import.meta.env.VITE_SENTRY_DSN || '';
+  const sentryUrl = sentryDsn 
+    ? `https://sentry.io/organizations/o4510521239994368/issues/?project=4510521242157056`
+    : 'https://sentry.io';
 
   // Toast helpers
   const addToast = useCallback((message, type = 'info') => {
@@ -1259,11 +1404,20 @@ function App() {
                   <Layers className="h-4 w-4 mr-1.5" />
                   Jaeger
                 </a>
+                <a
+                  href={sentryUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn-outline btn-sm hover:scale-105 transition-transform border-pink-500/50 text-pink-500 hover:bg-pink-500/10"
+                >
+                  <Bug className="h-4 w-4 mr-1.5" />
+                  Sentry
+                </a>
                 <button
                   onClick={() => showFeedbackDialog()}
                   className="btn-primary btn-sm hover:scale-105 transition-transform"
                 >
-                  <Bug className="h-4 w-4 mr-1.5" />
+                  <Send className="h-4 w-4 mr-1.5" />
                   Feedback
                 </button>
               </div>
@@ -1319,6 +1473,22 @@ function App() {
                   addToast('Error log cleared', 'info');
                 }}
                 onTriggerError={triggerTestError}
+              />
+            </div>
+
+            {/* Sentry Dashboard */}
+            <div className="md:col-span-2 lg:col-span-2">
+              <SentryDashboard
+                sentryUrl={sentryUrl}
+                onTriggerBackendError={() => {
+                  addError('Backend Sentry test error triggered', 'error');
+                  addToast('Backend error sent to Sentry', 'warning');
+                }}
+                onTriggerFrontendError={() => {
+                  captureMessage('Frontend test error from dashboard', 'error');
+                  addError('Frontend Sentry test error triggered', 'warning');
+                  addToast('Frontend error sent to Sentry', 'warning');
+                }}
               />
             </div>
           </div>
