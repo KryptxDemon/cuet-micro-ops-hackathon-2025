@@ -693,32 +693,32 @@ function TraceViewer({ currentTraceId, jaegerUrl }) {
       </div>
       <div className="card-content space-y-4 flex-1 flex flex-col">
         {/* Current Trace */}
-        <div className="p-3 rounded-md bg-muted/50 border border-border">
-          <div className="flex items-center justify-between mb-1">
-            <p className="text-xs text-muted-foreground font-medium">Current Trace ID</p>
+        <div className="p-3.5 rounded-xl bg-gradient-to-br from-muted/40 to-muted/60 border border-border/50">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wide">Current Trace ID</p>
             {currentTraceId && (
               <button 
                 onClick={copyTraceId}
-                className="text-xs text-blue-500 hover:text-blue-400 transition-colors"
+                className="text-xs font-semibold text-primary hover:text-primary/80 transition-all hover:scale-105 px-2 py-1 rounded-md hover:bg-primary/10"
               >
                 Copy
               </button>
             )}
           </div>
-          <p className="font-mono text-xs break-all leading-relaxed">
+          <p className="font-mono text-xs break-all leading-relaxed text-foreground">
             {currentTraceId || <span className="text-muted-foreground italic">No active trace</span>}
           </p>
         </div>
 
         {/* Jaeger Links */}
-        <div className="space-y-2 flex-1">
+        <div className="space-y-3 flex-1 flex flex-col justify-center">
           <a
             href={jaegerUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="btn-primary w-full justify-center"
+            className="btn-primary w-full justify-center text-base py-3 h-auto font-semibold shadow-lg hover:shadow-xl transition-all"
           >
-            <ExternalLink className="h-4 w-4 mr-2" />
+            <ExternalLink className="h-5 w-5 mr-2" />
             Open Jaeger UI
           </a>
 
@@ -727,7 +727,7 @@ function TraceViewer({ currentTraceId, jaegerUrl }) {
               href={`${jaegerUrl}/trace/${currentTraceId}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="btn-outline w-full justify-center"
+              className="btn-outline w-full justify-center text-sm py-2.5 h-auto font-semibold hover:shadow-md transition-all"
             >
               <Activity className="h-4 w-4 mr-2" />
               View Current Trace
@@ -736,9 +736,12 @@ function TraceViewer({ currentTraceId, jaegerUrl }) {
         </div>
 
         {/* Info */}
-        <div className="text-xs text-muted-foreground bg-muted/30 p-2 rounded-md mt-auto">
-          <p className="flex items-center gap-1">
-            <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+        <div className="text-xs text-muted-foreground bg-gradient-to-r from-green-500/10 to-emerald-500/10 border border-green-500/20 p-3 rounded-xl mt-auto">
+          <p className="flex items-center gap-2 font-medium">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-500 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+            </span>
             Traces sent via OpenTelemetry to Jaeger
           </p>
         </div>
@@ -1195,41 +1198,45 @@ function App() {
 
   return (
     <ErrorBoundary>
-      <div className={`min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 transition-colors duration-300`}>
+      <div className={`min-h-screen bg-gradient-to-br from-violet-50 via-purple-50 to-indigo-100 dark:from-gray-950 dark:via-purple-950 dark:to-indigo-950 transition-all duration-500`}>
         {/* Toast Notifications */}
         <ToastContainer toasts={toasts} onDismiss={dismissToast} />
 
         {/* Keyboard Shortcuts Modal */}
         <KeyboardShortcutsModal isOpen={showShortcuts} onClose={() => setShowShortcuts(false)} />
 
-        {/* Header */}
-        <header className="sticky top-0 z-50 glass border-b">
+        {/* Modern Header with Glassmorphism */}
+        <header className="sticky top-0 z-50 glass border-b backdrop-blur-xl">
           <div className="container mx-auto px-4 py-4">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-4">
                 <div className="relative">
-                  <Activity className="h-8 w-8 text-primary animate-pulse-slow" />
-                  <span className="absolute -top-1 -right-1 h-3 w-3 bg-green-500 rounded-full border-2 border-white dark:border-gray-900" />
+                  <div className="absolute inset-0 bg-gradient-to-r from-purple-600 to-indigo-600 rounded-2xl blur-xl opacity-50 animate-pulse-slow"></div>
+                  <div className="relative bg-gradient-to-r from-purple-600 to-indigo-600 p-2 rounded-2xl">
+                    <Activity className="h-6 w-6 text-white" />
+                  </div>
                 </div>
                 <div>
-                  <h1 className="text-xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                    Delineate Dashboard
+                  <h1 className="text-2xl font-bold">
+                    <span className="bg-gradient-to-r from-purple-600 via-indigo-600 to-blue-600 bg-clip-text text-transparent">
+                      Delineate Dashboard
+                    </span>
                   </h1>
-                  <p className="text-xs text-muted-foreground">
-                    Hackathon 2025 - Observability Demo
+                  <p className="text-xs text-muted-foreground font-medium">
+                    Hackathon 2025 • Observability Platform
                   </p>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-3">
                 {/* Auto-refresh indicator */}
                 <AutoRefreshIndicator secondsLeft={refreshCountdown} isRefreshing={healthLoading} />
                 
-                <div className="h-4 w-px bg-border mx-1" />
+                <div className="h-6 w-px bg-gradient-to-b from-transparent via-border to-transparent" />
 
                 <button
                   onClick={toggleDarkMode}
-                  className="btn-ghost btn-icon btn-sm"
+                  className="btn-ghost btn-icon btn-sm hover:scale-110 transition-transform"
                   title="Toggle dark mode (D)"
                 >
                   {isDarkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
@@ -1237,7 +1244,7 @@ function App() {
 
                 <button
                   onClick={() => setShowShortcuts(true)}
-                  className="btn-ghost btn-icon btn-sm"
+                  className="btn-ghost btn-icon btn-sm hover:scale-110 transition-transform"
                   title="Keyboard shortcuts (?)"
                 >
                   <Keyboard className="h-4 w-4" />
@@ -1247,16 +1254,16 @@ function App() {
                   href={jaegerUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="btn-outline btn-sm"
+                  className="btn-outline btn-sm hover:scale-105 transition-transform"
                 >
-                  <Layers className="h-4 w-4 mr-1" />
+                  <Layers className="h-4 w-4 mr-1.5" />
                   Jaeger
                 </a>
                 <button
                   onClick={() => showFeedbackDialog()}
-                  className="btn-ghost btn-sm"
+                  className="btn-primary btn-sm hover:scale-105 transition-transform"
                 >
-                  <Bug className="h-4 w-4 mr-1" />
+                  <Bug className="h-4 w-4 mr-1.5" />
                   Feedback
                 </button>
               </div>
@@ -1265,7 +1272,7 @@ function App() {
         </header>
 
         {/* Main Content */}
-        <main className="container mx-auto px-4 py-6">
+        <main className="container mx-auto px-4 py-8">
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
             {/* Health Status */}
             <div className="lg:col-span-1">
@@ -1317,20 +1324,25 @@ function App() {
           </div>
         </main>
 
-        {/* Footer */}
-        <footer className="border-t mt-8 bg-muted/30">
-          <div className="container mx-auto px-4 py-4">
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-2 text-sm text-muted-foreground">
-              <p className="flex items-center gap-2">
-                <Zap className="h-4 w-4 text-yellow-500" />
-                CUET Micro-Ops Hackathon 2025
-              </p>
-              <p className="flex items-center gap-2">
-                Built with 
-                <span className="text-blue-500">React</span> + 
-                <span className="text-purple-500">Sentry</span> + 
-                <span className="text-green-500">OpenTelemetry</span>
-              </p>
+        {/* Modern Footer with gradient */}
+        <footer className="border-t mt-12 glass backdrop-blur-xl">
+          <div className="container mx-auto px-4 py-6">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <div className="relative">
+                  <Zap className="h-5 w-5 text-yellow-500" />
+                  <span className="absolute inset-0 animate-ping">
+                    <Zap className="h-5 w-5 text-yellow-500 opacity-75" />
+                  </span>
+                </div>
+                <span className="font-semibold">CUET Micro-Ops Hackathon 2025</span>
+              </div>
+              <div className="flex items-center gap-3 text-sm">
+                <span className="text-muted-foreground">Powered by</span>
+                <span className="px-2 py-1 rounded-lg bg-gradient-to-r from-blue-500/10 to-blue-600/10 text-blue-600 dark:text-blue-400 font-semibold">React</span>
+                <span className="px-2 py-1 rounded-lg bg-gradient-to-r from-purple-500/10 to-purple-600/10 text-purple-600 dark:text-purple-400 font-semibold">Sentry</span>
+                <span className="px-2 py-1 rounded-lg bg-gradient-to-r from-green-500/10 to-green-600/10 text-green-600 dark:text-green-400 font-semibold">OpenTelemetry</span>
+              </div>
             </div>
           </div>
         </footer>

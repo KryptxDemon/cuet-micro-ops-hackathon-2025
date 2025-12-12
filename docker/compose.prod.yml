@@ -15,6 +15,8 @@ services:
       - ../.env.docker
     environment:
       - NODE_ENV=production
+      - NODE_OPTIONS=--max-old-space-size=384
+      - UV_THREADPOOL_SIZE=8
       - S3_ENDPOINT=http://minio:9000
       - S3_ACCESS_KEY_ID=minioadmin
       - S3_SECRET_ACCESS_KEY=minioadmin
@@ -50,6 +52,9 @@ services:
         limits:
           cpus: "1"
           memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
 
   # ===========================================
   # Worker Container - Background Job Processor (Production)
@@ -64,6 +69,8 @@ services:
       - ../.env.docker
     environment:
       - NODE_ENV=production
+      - NODE_OPTIONS=--max-old-space-size=192
+      - UV_THREADPOOL_SIZE=4
       - S3_ENDPOINT=http://minio:9000
       - S3_ACCESS_KEY_ID=minioadmin
       - S3_SECRET_ACCESS_KEY=minioadmin
@@ -80,11 +87,20 @@ services:
     restart: unless-stopped
     networks:
       - delineate-network
+    healthcheck:
+      test: ["CMD", "node", "-e", "process.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
     deploy:
       resources:
         limits:
           cpus: "0.5"
           memory: 256M
+        reservations:
+          cpus: "0.1"
+          memory: 64M
 
   # ===========================================
   # Redis - Job Queue (Production)
@@ -96,7 +112,15 @@ services:
       - "6379:6379"
     volumes:
       - redis-data:/data
-    command: redis-server --appendonly yes --maxmemory 100mb --maxmemory-policy allkeys-lru
+    command: >-
+      redis-server
+      --appendonly yes
+      --maxmemory 100mb
+      --maxmemory-policy allkeys-lru
+      --tcp-keepalive 300
+      --tcp-backlog 511
+      --save 900 1
+      --save 300 10
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -105,6 +129,14 @@ services:
     restart: unless-stopped
     networks:
       - delineate-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+        reservations:
+          cpus: "0.1"
+          memory: 64M
 
   # ===========================================
   # MinIO - Self-Hosted S3 Storage (Production)
@@ -120,6 +152,9 @@ services:
     environment:
       - MINIO_ROOT_USER=minioadmin
       - MINIO_ROOT_PASSWORD=minioadmin
+      - MINIO_API_REQUESTS_MAX=1000
+      - MINIO_API_REQUESTS_DEADLINE=10s
+      - GOMAXPROCS=2
     command: server /data --console-address ":9001"
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
@@ -129,6 +164,14 @@ services:
     restart: unless-stopped
     networks:
       - delineate-network
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
 
   # ===========================================
   # MinIO Init - Create Bucket on Startup
@@ -165,3 +208,14 @@ volumes:
 networks:
   delineate-network:
     driver: bridge
+    driver_opts:
+      com.docker.network.driver.mtu: 1500
+
+# ===========================================
+# Default Logging (Production)
+# ===========================================
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
