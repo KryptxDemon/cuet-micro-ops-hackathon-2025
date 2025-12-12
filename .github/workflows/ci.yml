@@ -288,16 +288,26 @@ jobs:
         id: npm-audit
         run: |
           echo "## 🔍 Dependency Audit Report" >> $GITHUB_STEP_SUMMARY
-          if npm audit --audit-level=moderate; then
-            echo "✅ No moderate or higher vulnerabilities found!" >> $GITHUB_STEP_SUMMARY
+          
+          # Run audit and capture exit code
+          if npm audit --audit-level=high; then
+            echo "✅ No high or critical vulnerabilities found!" >> $GITHUB_STEP_SUMMARY
+            exit 0
           else
+            audit_exit_code=$?
             echo "⚠️ Vulnerabilities detected. Review the details below:" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
+            
+            # Show detailed audit results
             echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-            npm audit --audit-level=info >> $GITHUB_STEP_SUMMARY 2>&1 || true
+            npm audit --audit-level=moderate >> $GITHUB_STEP_SUMMARY 2>&1 || true
             echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Note:** Build fails for high/critical vulnerabilities. Moderate vulnerabilities are warnings only." >> $GITHUB_STEP_SUMMARY
+            
+            # Fail if high or critical vulnerabilities found
+            exit $audit_exit_code
           fi
-        continue-on-error: true
 
   # ===========================================
   # Security Scanning - Trivy (Docker Image)
@@ -374,29 +384,57 @@ jobs:
           RAILWAY_SERVICE_ID: ${{ secrets.RAILWAY_SERVICE_ID }}
         run: |
           echo "Deploying to Railway..."
-          response=$(curl -X POST \
-            "https://api.railway.app/v1/projects/${RAILWAY_PROJECT_ID}/services/${RAILWAY_SERVICE_ID}/deploys" \
-            -H "Authorization: Bearer ${RAILWAY_API_KEY}" \
-            -H "Content-Type: application/json" \
-            -w "\n%{http_code}" \
-            -s)
-          http_code=$(echo "$response" | tail -n1)
-          body=$(echo "$response" | sed '$d')
           
-          if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
-            echo "✅ Railway deployment triggered successfully"
-            # Railway dashboard URL for the service
-            dashboard_url="https://railway.app/project/${RAILWAY_PROJECT_ID}/service/${RAILWAY_SERVICE_ID}"
-            echo "url=${dashboard_url}" >> $GITHUB_OUTPUT
-            echo "## 🚀 Deployment Status" >> $GITHUB_STEP_SUMMARY
-            echo "**Platform:** Railway" >> $GITHUB_STEP_SUMMARY
-            echo "**Status:** ✅ Deployment triggered" >> $GITHUB_STEP_SUMMARY
-            echo "**View Deployment:** [Railway Dashboard](${dashboard_url})" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Note:** Your app URL will be available in the Railway dashboard once deployed." >> $GITHUB_STEP_SUMMARY
-          else
-            echo "❌ Railway deployment failed with status $http_code"
-            echo "Response: $body"
+          # Retry logic with timeout
+          max_attempts=3
+          attempt=1
+          success=false
+          
+          while [ $attempt -le $max_attempts ] && [ "$success" = "false" ]; do
+            echo "Attempt $attempt of $max_attempts..."
+            
+            response=$(curl -X POST \
+              --max-time 30 \
+              --connect-timeout 10 \
+              --retry 2 \
+              --retry-delay 2 \
+              "https://api.railway.app/v1/projects/${RAILWAY_PROJECT_ID}/services/${RAILWAY_SERVICE_ID}/deploys" \
+              -H "Authorization: Bearer ${RAILWAY_API_KEY}" \
+              -H "Content-Type: application/json" \
+              -w "\n%{http_code}" \
+              -s)
+            
+            http_code=$(echo "$response" | tail -n1)
+            body=$(echo "$response" | sed '$d')
+            
+            if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
+              success=true
+              echo "✅ Railway deployment triggered successfully on attempt $attempt"
+              # Railway dashboard URL for the service
+              dashboard_url="https://railway.app/project/${RAILWAY_PROJECT_ID}/service/${RAILWAY_SERVICE_ID}"
+              echo "url=${dashboard_url}" >> $GITHUB_OUTPUT
+              echo "## 🚀 Deployment Status" >> $GITHUB_STEP_SUMMARY
+              echo "**Platform:** Railway" >> $GITHUB_STEP_SUMMARY
+              echo "**Status:** ✅ Deployment triggered" >> $GITHUB_STEP_SUMMARY
+              echo "**Attempts:** $attempt of $max_attempts" >> $GITHUB_STEP_SUMMARY
+              echo "**View Deployment:** [Railway Dashboard](${dashboard_url})" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "**Note:** Your app URL will be available in the Railway dashboard once deployed." >> $GITHUB_STEP_SUMMARY
+              break
+            else
+              echo "⚠️ Attempt $attempt failed with status $http_code"
+              if [ $attempt -lt $max_attempts ]; then
+                echo "Retrying in 5 seconds..."
+                sleep 5
+              fi
+            fi
+            
+            attempt=$((attempt + 1))
+          done
+          
+          if [ "$success" = "false" ]; then
+            echo "❌ Railway deployment failed after $max_attempts attempts"
+            echo "Last response (HTTP $http_code): $body"
             exit 1
           fi
 
@@ -408,28 +446,56 @@ jobs:
           RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
         run: |
           echo "Deploying to Render..."
-          response=$(curl -X POST \
-            -H "Authorization: Bearer ${RENDER_API_KEY}" \
-            https://api.render.com/deploy/${RENDER_SERVICE_ID} \
-            -w "\n%{http_code}" \
-            -s)
-          http_code=$(echo "$response" | tail -n1)
-          body=$(echo "$response" | sed '$d')
           
-          if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
-            echo "✅ Render deployment triggered successfully"
-            # Render dashboard URL
-            dashboard_url="https://dashboard.render.com"
-            echo "url=${dashboard_url}" >> $GITHUB_OUTPUT
-            echo "## 🚀 Deployment Status" >> $GITHUB_STEP_SUMMARY
-            echo "**Platform:** Render" >> $GITHUB_STEP_SUMMARY
-            echo "**Status:** ✅ Deployment triggered" >> $GITHUB_STEP_SUMMARY
-            echo "**View Deployment:** [Render Dashboard](${dashboard_url})" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Note:** Your service URL (e.g., https://yourservice.onrender.com) will be available in the Render dashboard." >> $GITHUB_STEP_SUMMARY
-          else
-            echo "❌ Render deployment failed with status $http_code"
-            echo "Response: $body"
+          # Retry logic with timeout
+          max_attempts=3
+          attempt=1
+          success=false
+          
+          while [ $attempt -le $max_attempts ] && [ "$success" = "false" ]; do
+            echo "Attempt $attempt of $max_attempts..."
+            
+            response=$(curl -X POST \
+              --max-time 30 \
+              --connect-timeout 10 \
+              --retry 2 \
+              --retry-delay 2 \
+              -H "Authorization: Bearer ${RENDER_API_KEY}" \
+              https://api.render.com/deploy/${RENDER_SERVICE_ID} \
+              -w "\n%{http_code}" \
+              -s)
+            
+            http_code=$(echo "$response" | tail -n1)
+            body=$(echo "$response" | sed '$d')
+            
+            if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
+              success=true
+              echo "✅ Render deployment triggered successfully on attempt $attempt"
+              # Render dashboard URL
+              dashboard_url="https://dashboard.render.com"
+              echo "url=${dashboard_url}" >> $GITHUB_OUTPUT
+              echo "## 🚀 Deployment Status" >> $GITHUB_STEP_SUMMARY
+              echo "**Platform:** Render" >> $GITHUB_STEP_SUMMARY
+              echo "**Status:** ✅ Deployment triggered" >> $GITHUB_STEP_SUMMARY
+              echo "**Attempts:** $attempt of $max_attempts" >> $GITHUB_STEP_SUMMARY
+              echo "**View Deployment:** [Render Dashboard](${dashboard_url})" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "**Note:** Your service URL (e.g., https://yourservice.onrender.com) will be available in the Render dashboard." >> $GITHUB_STEP_SUMMARY
+              break
+            else
+              echo "⚠️ Attempt $attempt failed with status $http_code"
+              if [ $attempt -lt $max_attempts ]; then
+                echo "Retrying in 5 seconds..."
+                sleep 5
+              fi
+            fi
+            
+            attempt=$((attempt + 1))
+          done
+          
+          if [ "$success" = "false" ]; then
+            echo "❌ Render deployment failed after $max_attempts attempts"
+            echo "Last response (HTTP $http_code): $body"
             exit 1
           fi
 
