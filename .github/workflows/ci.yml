@@ -285,14 +285,19 @@ jobs:
         run: npm ci
 
       - name: Run npm audit
-        run: npm audit --audit-level=moderate
-        continue-on-error: true
-
-      - name: Generate audit report
-        if: always()
+        id: npm-audit
         run: |
-          echo "## Dependency Audit Report" >> $GITHUB_STEP_SUMMARY
-          npm audit --audit-level=info || echo "Vulnerabilities found, check details above" >> $GITHUB_STEP_SUMMARY
+          echo "## 🔍 Dependency Audit Report" >> $GITHUB_STEP_SUMMARY
+          if npm audit --audit-level=moderate; then
+            echo "✅ No moderate or higher vulnerabilities found!" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ Vulnerabilities detected. Review the details below:" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            npm audit --audit-level=info >> $GITHUB_STEP_SUMMARY 2>&1 || true
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          fi
+        continue-on-error: true
 
   # ===========================================
   # Security Scanning - Trivy (Docker Image)
@@ -346,16 +351,32 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Check deployment configuration
+        id: check-deploy
+        run: |
+          if [ -n "${{ secrets.RAILWAY_API_KEY }}" ]; then
+            echo "platform=railway" >> $GITHUB_OUTPUT
+            echo "enabled=true" >> $GITHUB_OUTPUT
+          elif [ -n "${{ secrets.RENDER_API_KEY }}" ]; then
+            echo "platform=render" >> $GITHUB_OUTPUT
+            echo "enabled=true" >> $GITHUB_OUTPUT
+          else
+            echo "platform=none" >> $GITHUB_OUTPUT
+            echo "enabled=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Deploy to Railway
-        if: ${{ secrets.RAILWAY_API_KEY != '' }}
+        if: steps.check-deploy.outputs.platform == 'railway'
         id: railway-deploy
         env:
           RAILWAY_API_KEY: ${{ secrets.RAILWAY_API_KEY }}
+          RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
+          RAILWAY_SERVICE_ID: ${{ secrets.RAILWAY_SERVICE_ID }}
         run: |
           echo "Deploying to Railway..."
           response=$(curl -X POST \
-            "https://api.railway.app/v1/projects/${{ secrets.RAILWAY_PROJECT_ID }}/services/${{ secrets.RAILWAY_SERVICE_ID }}/deploys" \
-            -H "Authorization: Bearer $RAILWAY_API_KEY" \
+            "https://api.railway.app/v1/projects/${RAILWAY_PROJECT_ID}/services/${RAILWAY_SERVICE_ID}/deploys" \
+            -H "Authorization: Bearer ${RAILWAY_API_KEY}" \
             -H "Content-Type: application/json" \
             -w "\n%{http_code}" \
             -s)
@@ -364,14 +385,15 @@ jobs:
           
           if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
             echo "✅ Railway deployment triggered successfully"
-            # Try to construct the deployment URL from project/service IDs
-            app_url="https://${{ secrets.RAILWAY_SERVICE_ID }}.up.railway.app"
-            echo "url=$app_url" >> $GITHUB_OUTPUT
+            # Railway dashboard URL for the service
+            dashboard_url="https://railway.app/project/${RAILWAY_PROJECT_ID}/service/${RAILWAY_SERVICE_ID}"
+            echo "url=${dashboard_url}" >> $GITHUB_OUTPUT
             echo "## 🚀 Deployment Status" >> $GITHUB_STEP_SUMMARY
             echo "**Platform:** Railway" >> $GITHUB_STEP_SUMMARY
             echo "**Status:** ✅ Deployment triggered" >> $GITHUB_STEP_SUMMARY
-            echo "**Deployment URL:** Check Railway dashboard for the actual URL" >> $GITHUB_STEP_SUMMARY
-            echo "**Response:** $body" >> $GITHUB_STEP_SUMMARY
+            echo "**View Deployment:** [Railway Dashboard](${dashboard_url})" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Note:** Your app URL will be available in the Railway dashboard once deployed." >> $GITHUB_STEP_SUMMARY
           else
             echo "❌ Railway deployment failed with status $http_code"
             echo "Response: $body"
@@ -379,13 +401,16 @@ jobs:
           fi
 
       - name: Deploy to Render
-        if: ${{ secrets.RENDER_API_KEY != '' && secrets.RAILWAY_API_KEY == '' }}
+        if: steps.check-deploy.outputs.platform == 'render'
         id: render-deploy
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
         run: |
           echo "Deploying to Render..."
           response=$(curl -X POST \
-            -H "Authorization: Bearer ${{ secrets.RENDER_API_KEY }}" \
-            https://api.render.com/deploy/${{ secrets.RENDER_SERVICE_ID }} \
+            -H "Authorization: Bearer ${RENDER_API_KEY}" \
+            https://api.render.com/deploy/${RENDER_SERVICE_ID} \
             -w "\n%{http_code}" \
             -s)
           http_code=$(echo "$response" | tail -n1)
@@ -393,14 +418,15 @@ jobs:
           
           if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
             echo "✅ Render deployment triggered successfully"
-            # Render services typically have URLs like: https://servicename.onrender.com
-            app_url="https://render.com/dashboard"
-            echo "url=$app_url" >> $GITHUB_OUTPUT
+            # Render dashboard URL
+            dashboard_url="https://dashboard.render.com"
+            echo "url=${dashboard_url}" >> $GITHUB_OUTPUT
             echo "## 🚀 Deployment Status" >> $GITHUB_STEP_SUMMARY
             echo "**Platform:** Render" >> $GITHUB_STEP_SUMMARY
             echo "**Status:** ✅ Deployment triggered" >> $GITHUB_STEP_SUMMARY
-            echo "**Deployment URL:** Check Render dashboard for the actual URL" >> $GITHUB_STEP_SUMMARY
-            echo "**Response:** $body" >> $GITHUB_STEP_SUMMARY
+            echo "**View Deployment:** [Render Dashboard](${dashboard_url})" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Note:** Your service URL (e.g., https://yourservice.onrender.com) will be available in the Render dashboard." >> $GITHUB_STEP_SUMMARY
           else
             echo "❌ Render deployment failed with status $http_code"
             echo "Response: $body"
@@ -410,24 +436,28 @@ jobs:
       - name: Set deployment output
         id: deployment
         run: |
-          if [ "${{ secrets.RAILWAY_API_KEY }}" != "" ]; then
+          if [ "${{ steps.check-deploy.outputs.platform }}" == "railway" ]; then
             echo "url=${{ steps.railway-deploy.outputs.url }}" >> $GITHUB_OUTPUT
-          elif [ "${{ secrets.RENDER_API_KEY }}" != "" ]; then
+          elif [ "${{ steps.check-deploy.outputs.platform }}" == "render" ]; then
             echo "url=${{ steps.render-deploy.outputs.url }}" >> $GITHUB_OUTPUT
           else
-            echo "⚠️ No deployment credentials configured"
             echo "url=" >> $GITHUB_OUTPUT
           fi
 
       - name: Deployment Summary
-        if: always()
+        if: steps.check-deploy.outputs.enabled == 'false'
         run: |
-          if [ "${{ secrets.RAILWAY_API_KEY }}" == "" ] && [ "${{ secrets.RENDER_API_KEY }}" == "" ]; then
-            echo "## ⚠️ Deployment Skipped" >> $GITHUB_STEP_SUMMARY
-            echo "No deployment credentials found. Configure one of the following:" >> $GITHUB_STEP_SUMMARY
-            echo "- RAILWAY_API_KEY, RAILWAY_PROJECT_ID, RAILWAY_SERVICE_ID" >> $GITHUB_STEP_SUMMARY
-            echo "- RENDER_API_KEY, RENDER_SERVICE_ID" >> $GITHUB_STEP_SUMMARY
-          fi
+          echo "## ⚠️ Deployment Skipped" >> $GITHUB_STEP_SUMMARY
+          echo "No deployment credentials found. Configure one of the following:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Railway:**" >> $GITHUB_STEP_SUMMARY
+          echo "- RAILWAY_API_KEY" >> $GITHUB_STEP_SUMMARY
+          echo "- RAILWAY_PROJECT_ID" >> $GITHUB_STEP_SUMMARY
+          echo "- RAILWAY_SERVICE_ID" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Render:**" >> $GITHUB_STEP_SUMMARY
+          echo "- RENDER_API_KEY" >> $GITHUB_STEP_SUMMARY
+          echo "- RENDER_SERVICE_ID" >> $GITHUB_STEP_SUMMARY
 
   # ===========================================
   # Notify on Failure (Optional - requires secrets)
