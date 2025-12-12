@@ -5,6 +5,7 @@ on:
     branches: [main, master]
   pull_request:
     branches: [main, master]
+  workflow_dispatch:
 
 env:
   NODE_VERSION: "24"
@@ -258,6 +259,40 @@ jobs:
         run: docker compose -f docker/compose.dev.yml down -v
 
   # ===========================================
+  # Dependency Vulnerability Checks
+  # ===========================================
+  dependency-scan:
+    name: Dependency Vulnerability Scan
+    runs-on: ubuntu-24.04
+    needs: lint
+    container:
+      image: node:24-slim
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache node modules
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run npm audit
+        run: npm audit --audit-level=moderate
+        continue-on-error: true
+
+      - name: Generate audit report
+        if: always()
+        run: |
+          echo "## Dependency Audit Report" >> $GITHUB_STEP_SUMMARY
+          npm audit --audit-level=info || echo "Vulnerabilities found, check details above" >> $GITHUB_STEP_SUMMARY
+
+  # ===========================================
   # Security Scanning - Trivy (Docker Image)
   # ===========================================
   security-scan:
@@ -293,12 +328,104 @@ jobs:
           sarif_file: "trivy-results.sarif"
 
   # ===========================================
+  # Deployment (Railway or Render)
+  # ===========================================
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-24.04
+    needs: [lint, test, build, docker-integration, dependency-scan, security-scan]
+    if: github.ref == 'refs/heads/main' && success()
+    environment:
+      name: production
+      url: ${{ steps.deployment.outputs.url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy to Railway
+        if: ${{ secrets.RAILWAY_API_KEY != '' }}
+        id: railway-deploy
+        env:
+          RAILWAY_API_KEY: ${{ secrets.RAILWAY_API_KEY }}
+        run: |
+          echo "Deploying to Railway..."
+          response=$(curl -X POST \
+            "https://api.railway.app/v1/projects/${{ secrets.RAILWAY_PROJECT_ID }}/services/${{ secrets.RAILWAY_SERVICE_ID }}/deploys" \
+            -H "Authorization: Bearer $RAILWAY_API_KEY" \
+            -H "Content-Type: application/json" \
+            -w "\n%{http_code}" \
+            -s)
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+          
+          if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
+            echo "✅ Railway deployment triggered successfully"
+            echo "url=https://railway.app" >> $GITHUB_OUTPUT
+            echo "## 🚀 Deployment Status" >> $GITHUB_STEP_SUMMARY
+            echo "**Platform:** Railway" >> $GITHUB_STEP_SUMMARY
+            echo "**Status:** ✅ Deployment triggered" >> $GITHUB_STEP_SUMMARY
+            echo "**Response:** $body" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Railway deployment failed with status $http_code"
+            echo "Response: $body"
+            exit 1
+          fi
+
+      - name: Deploy to Render
+        if: ${{ secrets.RENDER_API_KEY != '' && secrets.RAILWAY_API_KEY == '' }}
+        id: render-deploy
+        run: |
+          echo "Deploying to Render..."
+          response=$(curl -X POST \
+            -H "Authorization: Bearer ${{ secrets.RENDER_API_KEY }}" \
+            https://api.render.com/deploy/${{ secrets.RENDER_SERVICE_ID }} \
+            -w "\n%{http_code}" \
+            -s)
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+          
+          if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
+            echo "✅ Render deployment triggered successfully"
+            echo "url=https://render.com" >> $GITHUB_OUTPUT
+            echo "## 🚀 Deployment Status" >> $GITHUB_STEP_SUMMARY
+            echo "**Platform:** Render" >> $GITHUB_STEP_SUMMARY
+            echo "**Status:** ✅ Deployment triggered" >> $GITHUB_STEP_SUMMARY
+            echo "**Response:** $body" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Render deployment failed with status $http_code"
+            echo "Response: $body"
+            exit 1
+          fi
+
+      - name: Set deployment output
+        id: deployment
+        run: |
+          if [ "${{ secrets.RAILWAY_API_KEY }}" != "" ]; then
+            echo "url=${{ steps.railway-deploy.outputs.url }}" >> $GITHUB_OUTPUT
+          elif [ "${{ secrets.RENDER_API_KEY }}" != "" ]; then
+            echo "url=${{ steps.render-deploy.outputs.url }}" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️ No deployment credentials configured"
+            echo "url=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Deployment Summary
+        if: always()
+        run: |
+          if [ "${{ secrets.RAILWAY_API_KEY }}" == "" ] && [ "${{ secrets.RENDER_API_KEY }}" == "" ]; then
+            echo "## ⚠️ Deployment Skipped" >> $GITHUB_STEP_SUMMARY
+            echo "No deployment credentials found. Configure one of the following:" >> $GITHUB_STEP_SUMMARY
+            echo "- RAILWAY_API_KEY, RAILWAY_PROJECT_ID, RAILWAY_SERVICE_ID" >> $GITHUB_STEP_SUMMARY
+            echo "- RENDER_API_KEY, RENDER_SERVICE_ID" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # ===========================================
   # Notify on Failure (Optional - requires secrets)
   # ===========================================
   notify-failure:
     name: Notify on Failure
     runs-on: ubuntu-24.04
-    needs: [lint, test, build, docker-integration]
+    needs: [lint, test, build, docker-integration, dependency-scan, security-scan, deploy]
     if: failure() && github.ref == 'refs/heads/main'
     steps:
       - name: Slack Notification
