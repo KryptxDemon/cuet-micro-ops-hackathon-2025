@@ -265,6 +265,8 @@ jobs:
     name: Dependency Vulnerability Scan
     runs-on: ubuntu-24.04
     needs: lint
+    permissions:
+      contents: read
     container:
       image: node:24-slim
     steps:
@@ -335,6 +337,8 @@ jobs:
     runs-on: ubuntu-24.04
     needs: [lint, test, build, docker-integration, dependency-scan, security-scan]
     if: github.ref == 'refs/heads/main' && success()
+    permissions:
+      contents: read
     environment:
       name: production
       url: ${{ steps.deployment.outputs.url }}
@@ -360,10 +364,13 @@ jobs:
           
           if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
             echo "✅ Railway deployment triggered successfully"
-            echo "url=https://railway.app" >> $GITHUB_OUTPUT
+            # Try to construct the deployment URL from project/service IDs
+            app_url="https://${{ secrets.RAILWAY_SERVICE_ID }}.up.railway.app"
+            echo "url=$app_url" >> $GITHUB_OUTPUT
             echo "## 🚀 Deployment Status" >> $GITHUB_STEP_SUMMARY
             echo "**Platform:** Railway" >> $GITHUB_STEP_SUMMARY
             echo "**Status:** ✅ Deployment triggered" >> $GITHUB_STEP_SUMMARY
+            echo "**Deployment URL:** Check Railway dashboard for the actual URL" >> $GITHUB_STEP_SUMMARY
             echo "**Response:** $body" >> $GITHUB_STEP_SUMMARY
           else
             echo "❌ Railway deployment failed with status $http_code"
@@ -386,10 +393,13 @@ jobs:
           
           if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
             echo "✅ Render deployment triggered successfully"
-            echo "url=https://render.com" >> $GITHUB_OUTPUT
+            # Render services typically have URLs like: https://servicename.onrender.com
+            app_url="https://render.com/dashboard"
+            echo "url=$app_url" >> $GITHUB_OUTPUT
             echo "## 🚀 Deployment Status" >> $GITHUB_STEP_SUMMARY
             echo "**Platform:** Render" >> $GITHUB_STEP_SUMMARY
             echo "**Status:** ✅ Deployment triggered" >> $GITHUB_STEP_SUMMARY
+            echo "**Deployment URL:** Check Render dashboard for the actual URL" >> $GITHUB_STEP_SUMMARY
             echo "**Response:** $body" >> $GITHUB_STEP_SUMMARY
           else
             echo "❌ Render deployment failed with status $http_code"
