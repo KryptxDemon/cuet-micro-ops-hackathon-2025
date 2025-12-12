@@ -14,6 +14,11 @@ import { secureHeaders } from "hono/secure-headers";
 import { timeout } from "hono/timeout";
 import { rateLimiter } from "hono-rate-limiter";
 
+// Async download system imports
+import { s3Service } from "./services/s3Service.ts";
+import { initializeWorker, shutdownWorker } from "./jobs/downloadWorker.ts";
+import { asyncDownloadRoutes } from "./routes/download.ts";
+
 // Helper for optional URL that treats empty string as undefined
 const optionalUrl = z
   .string()
@@ -73,6 +78,19 @@ const otelSDK = new NodeSDK({
   traceExporter: new OTLPTraceExporter(),
 });
 otelSDK.start();
+
+// Initialize S3 service for async downloads
+s3Service.initialize({
+  region: env.S3_REGION,
+  endpoint: env.S3_ENDPOINT,
+  accessKeyId: env.S3_ACCESS_KEY_ID,
+  secretAccessKey: env.S3_SECRET_ACCESS_KEY,
+  bucketName: env.S3_BUCKET_NAME,
+  forcePathStyle: env.S3_FORCE_PATH_STYLE,
+});
+
+// Initialize download worker (starts processing queue)
+initializeWorker();
 
 const app = new OpenAPIHono();
 
@@ -619,6 +637,9 @@ app.openapi(downloadStartRoute, async (c) => {
   }
 });
 
+// Mount async download routes
+app.route("/", asyncDownloadRoutes);
+
 // OpenAPI spec endpoint (disabled in production)
 if (env.NODE_ENV !== "production") {
   app.doc("/openapi", {
@@ -643,20 +664,30 @@ const gracefulShutdown = (server: ServerType) => (signal: string) => {
   server.close(() => {
     console.log("HTTP server closed");
 
-    // Shutdown OpenTelemetry to flush traces
-    otelSDK
-      .shutdown()
+    // Shutdown download worker first (waits for active jobs)
+    shutdownWorker()
       .then(() => {
-        console.log("OpenTelemetry SDK shut down");
+        console.log("Download worker shut down");
       })
       .catch((err: unknown) => {
-        console.error("Error shutting down OpenTelemetry:", err);
+        console.error("Error shutting down download worker:", err);
       })
       .finally(() => {
-        // Destroy S3 client
-        s3Client.destroy();
-        console.log("S3 client destroyed");
-        console.log("Graceful shutdown completed");
+        // Shutdown OpenTelemetry to flush traces
+        otelSDK
+          .shutdown()
+          .then(() => {
+            console.log("OpenTelemetry SDK shut down");
+          })
+          .catch((err: unknown) => {
+            console.error("Error shutting down OpenTelemetry:", err);
+          })
+          .finally(() => {
+            // Destroy S3 client
+            s3Client.destroy();
+            console.log("S3 client destroyed");
+            console.log("Graceful shutdown completed");
+          });
       });
   });
 };
