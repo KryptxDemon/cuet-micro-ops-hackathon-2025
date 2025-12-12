@@ -5,7 +5,11 @@
  * In production, this would be replaced with Redis or a database.
  *
  * Job lifecycle: queued → processing → ready/failed
+ *
+ * HYBRID PATTERN: Includes EventEmitter for real-time SSE updates
  */
+
+import { EventEmitter } from "events";
 
 // Job status enum
 export type JobStatus = "queued" | "processing" | "ready" | "failed";
@@ -45,9 +49,16 @@ export interface UpdateJobInput {
 /**
  * In-memory job store
  * Uses a Map for O(1) lookups by jobId
+ * EventEmitter for real-time SSE updates (Hybrid Pattern)
  */
-class JobStore {
+class JobStore extends EventEmitter {
   private jobs = new Map<string, Job>();
+
+  constructor() {
+    super();
+    // Allow many listeners for SSE connections
+    this.setMaxListeners(1000);
+  }
 
   /**
    * Create a new job
@@ -67,6 +78,11 @@ class JobStore {
     console.log(
       `[JobStore] Created job ${input.jobId} with ${String(input.fileIds.length)} files`,
     );
+
+    // Emit event for SSE subscribers
+    this.emit(`job:${input.jobId}`, { type: "created", job });
+    this.emit("job:created", job);
+
     return job;
   }
 
@@ -98,6 +114,19 @@ class JobStore {
     console.log(
       `[JobStore] Updated job ${jobId}: status=${updatedJob.status}, progress=${String(updatedJob.progress)}%`,
     );
+
+    // Emit event for SSE subscribers (Hybrid Pattern)
+    this.emit(`job:${jobId}`, { type: "updated", job: updatedJob });
+
+    // Emit completion events
+    if (updatedJob.status === "ready") {
+      this.emit(`job:${jobId}`, { type: "completed", job: updatedJob });
+      this.emit("job:completed", updatedJob);
+    } else if (updatedJob.status === "failed") {
+      this.emit(`job:${jobId}`, { type: "failed", job: updatedJob });
+      this.emit("job:failed", updatedJob);
+    }
+
     return updatedJob;
   }
 

@@ -16,6 +16,8 @@ import {
   HeadObjectCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { NodeHttpHandler } from "@smithy/node-http-handler";
+import { Agent } from "node:https";
 
 // S3 configuration interface
 export interface S3Config {
@@ -30,8 +32,17 @@ export interface S3Config {
 // Default presigned URL expiration (24 hours in seconds)
 const DEFAULT_URL_EXPIRATION = 24 * 60 * 60;
 
+// OPTIMIZATION: Reusable HTTP agent with keep-alive for connection pooling
+const httpsAgent = new Agent({
+  keepAlive: true,
+  maxSockets: 50, // Max concurrent connections
+  maxFreeSockets: 10, // Keep idle connections ready
+  timeout: 60000, // 60 second timeout
+});
+
 /**
  * S3 Service class
+ * OPTIMIZED: Uses connection pooling via HTTP keep-alive
  */
 class S3Service {
   private client: S3Client | null = null;
@@ -40,6 +51,7 @@ class S3Service {
 
   /**
    * Initialize the S3 service with configuration
+   * OPTIMIZED: Uses custom HTTP handler with connection pooling
    */
   initialize(config: S3Config): void {
     this.bucketName = config.bucketName;
@@ -57,11 +69,18 @@ class S3Service {
             },
           }),
         forcePathStyle: config.forcePathStyle,
+        // OPTIMIZATION: Custom HTTP handler with keep-alive
+        requestHandler: new NodeHttpHandler({
+          httpsAgent,
+          connectionTimeout: 5000,
+          socketTimeout: 30000,
+        }),
       });
       this.isConfigured = true;
       console.log(
         `[S3Service] Initialized with bucket: ${config.bucketName}, endpoint: ${config.endpoint ?? "AWS S3"}`,
       );
+      console.log(`[S3Service] Connection pooling enabled (maxSockets: 50)`);
     } else {
       this.isConfigured = false;
       console.log("[S3Service] Running in mock mode (no bucket configured)");

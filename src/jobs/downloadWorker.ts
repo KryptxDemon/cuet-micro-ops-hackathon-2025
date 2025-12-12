@@ -19,6 +19,9 @@ import type { QueueJob } from "./queue.ts";
 const MIN_PROCESS_TIME = 1000;
 const MAX_PROCESS_TIME = 3000;
 
+// Optimization: Process files in parallel batches
+const PARALLEL_FILE_BATCH_SIZE = 3;
+
 /**
  * Simulate file processing delay
  * In real world, this would be actual file generation/fetch
@@ -49,6 +52,7 @@ async function processFile(
 /**
  * Main job processor function
  * Called by the queue when a job is ready to process
+ * OPTIMIZED: Uses parallel batch processing for files
  */
 async function processDownloadJob(queueJob: QueueJob): Promise<void> {
   const { jobId, fileIds } = queueJob;
@@ -71,19 +75,30 @@ async function processDownloadJob(queueJob: QueueJob): Promise<void> {
   const processedS3Keys: string[] = [];
 
   try {
-    // Process each file
-    for (let i = 0; i < totalFiles; i++) {
-      const fileId = fileIds[i];
+    // OPTIMIZATION: Process files in parallel batches
+    // Instead of processing one file at a time, process PARALLEL_FILE_BATCH_SIZE files concurrently
+    let processedCount = 0;
+
+    for (let i = 0; i < totalFiles; i += PARALLEL_FILE_BATCH_SIZE) {
+      const batch = fileIds.slice(i, i + PARALLEL_FILE_BATCH_SIZE);
+      
       console.log(
-        `[Worker] Job ${jobId}: Processing file ${String(fileId)} (${String(i + 1)}/${String(totalFiles)})`,
+        `[Worker] Job ${jobId}: Processing batch of ${String(batch.length)} files (${String(i + 1)}-${String(Math.min(i + batch.length, totalFiles))}/${String(totalFiles)})`,
       );
 
-      // Process the file
-      const { s3Key } = await processFile(fileId);
-      processedS3Keys.push(s3Key);
+      // Process batch in parallel using Promise.all
+      const batchResults = await Promise.all(
+        batch.map(async (fileId) => {
+          const { s3Key } = await processFile(fileId);
+          return s3Key;
+        })
+      );
 
-      // Update progress
-      const progress = Math.round(((i + 1) / totalFiles) * 100);
+      processedS3Keys.push(...batchResults);
+      processedCount += batch.length;
+
+      // Update progress after each batch
+      const progress = Math.round((processedCount / totalFiles) * 100);
       jobStore.updateJob(jobId, { progress });
 
       console.log(`[Worker] Job ${jobId}: Progress ${String(progress)}%`);

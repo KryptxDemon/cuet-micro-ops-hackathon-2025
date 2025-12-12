@@ -4,6 +4,12 @@
 
 This document describes the architecture for handling long-running file downloads that can take 10-120+ seconds, solving HTTP timeout issues when deployed behind reverse proxies like Cloudflare, nginx, or AWS ALB.
 
+**Pattern Used: HYBRID APPROACH (Option D)**
+
+- **Polling (Option A)**: Traditional HTTP polling for compatibility
+- **SSE (Option B)**: Server-Sent Events for real-time updates
+- Client chooses the best method based on capabilities
+
 ---
 
 ## 1. Architecture Diagram
@@ -11,6 +17,12 @@ This document describes the architecture for handling long-running file download
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
 │                              CLIENT (Browser/App)                                │
+│                                                                                  │
+│  ┌─────────────────────────────────────┐  ┌──────────────────────────────────┐  │
+│  │  OPTION A: Polling                  │  │  OPTION B: SSE (Real-time)       │  │
+│  │  GET /status/:jobId every 2-5s      │  │  GET /subscribe/:jobId (stream)  │  │
+│  │  ✓ Simple, works everywhere         │  │  ✓ Instant updates, no polling   │  │
+│  └─────────────────────────────────────┘  └──────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────────────┘
                                         │
                                         │ HTTPS
@@ -25,9 +37,10 @@ This document describes the architecture for handling long-running file download
 ┌─────────────────────────────────────────────────────────────────────────────────┐
 │                              API SERVER (Hono)                                   │
 │  ┌─────────────────────────────────────────────────────────────────────────┐    │
-│  │  POST /v1/download/async     → Creates job, returns jobId immediately   │    │
-│  │  GET  /v1/download/status/:id → Returns job status & progress          │    │
-│  │  GET  /v1/download/queue/stats → Queue statistics                      │    │
+│  │  POST /v1/download/async        → Creates job, returns jobId            │    │
+│  │  GET  /v1/download/status/:id   → Returns job status (Polling)          │    │
+│  │  GET  /v1/download/subscribe/:id → SSE stream (Real-time)               │    │
+│  │  GET  /v1/download/queue/stats  → Queue statistics                      │    │
 │  └─────────────────────────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────────────────────────┘
           │                                              │
@@ -36,11 +49,12 @@ This document describes the architecture for handling long-running file download
 ┌──────────────────────┐                    ┌──────────────────────┐
 │     JOB STORE        │◄──────────────────►│     JOB QUEUE        │
 │  (In-Memory/Redis)   │                    │  (In-Memory/BullMQ)  │
-│                      │                    │                      │
+│  + EventEmitter      │                    │                      │
 │  - jobId             │                    │  - FIFO processing   │
 │  - status            │                    │  - Concurrency: 2    │
 │  - progress          │                    │  - Retry: 3 attempts │
 │  - downloadUrl       │                    │                      │
+│  - emit('job:xxx')   │                    │                      │
 └──────────────────────┘                    └──────────────────────┘
                                                        │
                                                        │ Process jobs
@@ -49,11 +63,12 @@ This document describes the architecture for handling long-running file download
 │                              BACKGROUND WORKER                                   │
 │  ┌─────────────────────────────────────────────────────────────────────────┐    │
 │  │  1. Pick job from queue                                                 │    │
-│  │  2. Update status → "processing"                                        │    │
+│  │  2. Update status → "processing" (triggers SSE event)                   │    │
 │  │  3. Process each file (simulated delay)                                 │    │
-│  │  4. Upload to S3                                                        │    │
-│  │  5. Generate presigned URL                                              │    │
-│  │  6. Update status → "ready" with downloadUrl                           │    │
+│  │  4. Update progress → 33%, 67%, 100% (triggers SSE events)              │    │
+│  │  5. Upload to S3                                                        │    │
+│  │  6. Generate presigned URL                                              │    │
+│  │  7. Update status → "ready" (triggers SSE completion event)             │    │
 │  └─────────────────────────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────────────────────────┘
                                         │
@@ -70,102 +85,146 @@ This document describes the architecture for handling long-running file download
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Data Flow for Download Request
+### Data Flow: Hybrid Pattern Comparison
 
 ```
-┌──────┐    ┌─────────┐    ┌─────────┐    ┌────────┐    ┌──────┐
-│Client│    │  Proxy  │    │   API   │    │ Worker │    │  S3  │
-└──┬───┘    └────┬────┘    └────┬────┘    └───┬────┘    └──┬───┘
-   │             │              │             │            │
-   │ POST /async │              │             │            │
-   │────────────►│─────────────►│             │            │
-   │             │              │             │            │
-   │             │    202 Accepted (jobId)    │            │
-   │◄────────────│◄─────────────│             │            │
-   │             │              │             │            │
-   │             │              │ Queue Job   │            │
-   │             │              │────────────►│            │
-   │             │              │             │            │
-   │ GET /status │              │             │ Process    │
-   │────────────►│─────────────►│             │───────────►│
-   │             │              │             │  Upload    │
-   │   "processing" 50%         │             │            │
-   │◄────────────│◄─────────────│             │            │
-   │             │              │             │            │
-   │ GET /status │              │             │ Presigned  │
-   │────────────►│─────────────►│             │◄───────────│
-   │             │              │             │    URL     │
-   │  "ready" + downloadUrl     │             │            │
-   │◄────────────│◄─────────────│             │            │
-   │             │              │             │            │
-   │ GET downloadUrl (direct S3 download)     │            │
-   │──────────────────────────────────────────────────────►│
-   │             │              │             │            │
-   │        File Content        │             │            │
-   │◄──────────────────────────────────────────────────────│
+┌────────────────────────────────────────────────────────────────────────────────┐
+│                        POLLING vs SSE DATA FLOW                                 │
+├────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                │
+│  POLLING (Option A):                    SSE (Option B):                        │
+│  ─────────────────────                  ─────────────────────                  │
+│                                                                                │
+│  Client         Server                  Client         Server                  │
+│    │              │                       │              │                     │
+│    │─POST /async─►│                       │─POST /async─►│                     │
+│    │◄─202 jobId───│                       │◄─202 jobId───│                     │
+│    │              │                       │              │                     │
+│    │─GET /status─►│                       │─GET /subscribe─►│                  │
+│    │◄─processing──│                       │◄─SSE: connected─│                  │
+│    │              │                       │◄─SSE: progress──│ (auto-push)      │
+│    │─GET /status─►│ (2s later)            │◄─SSE: progress──│ (auto-push)      │
+│    │◄─processing──│                       │◄─SSE: completed─│ (auto-push)      │
+│    │              │                       │              │                     │
+│    │─GET /status─►│ (2s later)            │  Done! Only 2 requests total       │
+│    │◄─ready+URL───│                       │                                    │
+│    │              │                       │                                    │
+│    │  3+ requests needed                  │                                    │
+│                                                                                │
+└────────────────────────────────────────────────────────────────────────────────┘
+```
+
+│ GET downloadUrl (direct S3 download) │ │
+│──────────────────────────────────────────────────────►│
+│ │ │ │ │
+│ File Content │ │ │
+│◄──────────────────────────────────────────────────────│
+
 ```
 
 ---
 
-## 2. Technical Approach: Polling Pattern
+## 2. Technical Approach: Hybrid Pattern (Option D)
 
-### Why Polling?
+### Why Hybrid (Polling + SSE)?
 
-We chose the **Polling Pattern** for the following reasons:
+We chose the **Hybrid Pattern** combining **Polling + SSE** for maximum flexibility:
 
-| Consideration             | Polling      | WebSocket        | Webhook         |
+| Consideration             | Polling Only | SSE Only         | **Hybrid** ✅   |
 | ------------------------- | ------------ | ---------------- | --------------- |
-| Implementation Complexity | Low ✅       | Medium           | High            |
-| Client Compatibility      | Universal ✅ | Modern browsers  | Requires server |
-| Proxy Friendly            | Yes ✅       | Requires config  | N/A             |
-| Stateless Server          | Yes ✅       | No               | Yes             |
-| Real-time Updates         | ~2-5s delay  | Instant          | Instant         |
-| Resource Usage            | Moderate     | Low (persistent) | Low             |
+| Implementation Complexity | Low          | Medium           | Medium ✅       |
+| Client Compatibility      | Universal    | Modern browsers  | **Both** ✅     |
+| Proxy Friendly            | Yes          | Usually yes      | **Yes** ✅      |
+| Real-time Updates         | ~2-5s delay  | Instant          | **Instant** ✅  |
+| Fallback Support          | N/A          | No               | **Yes** ✅      |
+| Resource Usage            | Higher       | Lower            | **Optimal** ✅  |
 
-**Polling is ideal because:**
+**Hybrid is ideal because:**
 
-1. Works behind any proxy without special configuration
-2. Client can disconnect/reconnect without losing job state
-3. Simple implementation with standard REST endpoints
-4. No long-lived connections to manage
+1. **Best of Both Worlds**: Real-time for modern clients, polling fallback for legacy
+2. **Graceful Degradation**: If SSE fails, client can fall back to polling
+3. **Proxy Compatible**: SSE works through most proxies, polling works through all
+4. **Client Choice**: Client decides based on capabilities and requirements
+5. **No WebSocket Complexity**: SSE is simpler than WebSocket (one-way, auto-reconnect)
 
-### Pattern Flow
+### Available Endpoints
+
+| Endpoint                            | Pattern     | Use Case                    |
+| ----------------------------------- | ----------- | --------------------------- |
+| `POST /v1/download/async`           | Both        | Start job, get jobId        |
+| `GET /v1/download/status/:jobId`    | **Polling** | Simple status check         |
+| `GET /v1/download/subscribe/:jobId` | **SSE**     | Real-time progress stream   |
+| `GET /v1/download/queue/stats`      | Both        | Queue metrics               |
+
+### Pattern Flow: Polling vs SSE
 
 ```
-Client                           Server
-   │                                │
-   │ POST /v1/download/async        │
-   │ { file_ids: [1, 2, 3] }        │
-   │───────────────────────────────►│
-   │                                │ Create job in store
-   │                                │ Add to queue
-   │    202 { jobId, statusUrl }    │
-   │◄───────────────────────────────│
-   │                                │
-   │  ┌─────────────────────────┐   │
-   │  │ Poll every 2-5 seconds  │   │
-   │  └─────────────────────────┘   │
-   │                                │
-   │ GET /v1/download/status/:jobId │
-   │───────────────────────────────►│
-   │   { status: "queued", 0% }     │
-   │◄───────────────────────────────│
-   │                                │
-   │ GET /v1/download/status/:jobId │
-   │───────────────────────────────►│
-   │  { status: "processing", 50% } │
-   │◄───────────────────────────────│
-   │                                │
-   │ GET /v1/download/status/:jobId │
-   │───────────────────────────────►│
-   │  { status: "ready", 100%,      │
-   │    downloadUrl: "https://..." }│
-   │◄───────────────────────────────│
-   │                                │
-   │ User clicks downloadUrl        │
-   │ (Direct S3 presigned URL)      │
-   │───────────────────────────────►│ S3
-```
+
+┌────────────────────────────────────────────────────────────────────────────────┐
+│ OPTION A: POLLING │
+├────────────────────────────────────────────────────────────────────────────────┤
+Client Server
+│ │
+│ POST /v1/download/async │
+│ { file_ids: [1, 2, 3] } │
+│───────────────────────────────►│
+│ │ Create job in store
+│ │ Add to queue
+│ 202 { jobId, statusUrl } │
+│◄───────────────────────────────│
+│ │
+│ ┌─────────────────────────┐ │
+│ │ Poll every 2-5 seconds │ │
+│ └─────────────────────────┘ │
+│ │
+│ GET /v1/download/status/:jobId │
+│───────────────────────────────►│
+│ { status: "queued", 0% } │
+│◄───────────────────────────────│
+│ │
+│ GET /v1/download/status/:jobId │
+│───────────────────────────────►│
+│ { status: "processing", 50% } │
+│◄───────────────────────────────│
+│ │
+│ GET /v1/download/status/:jobId │
+│───────────────────────────────►│
+│ { status: "ready", 100%, │
+│ downloadUrl: "https://..." }│
+│◄───────────────────────────────│
+│ │
+│ Total: 4+ HTTP requests │
+└────────────────────────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────────────────────┐
+│ OPTION B: SSE (Real-time) │
+├────────────────────────────────────────────────────────────────────────────────┤
+Client Server
+│ │
+│ POST /v1/download/async │
+│ { file_ids: [1, 2, 3] } │
+│───────────────────────────────►│
+│ │
+│ 202 { jobId, statusUrl } │
+│◄───────────────────────────────│
+│ │
+│ GET /v1/download/subscribe/:id │ ← Single SSE connection
+│───────────────────────────────►│
+│ │
+│ event: connected │ ← Server pushes automatically
+│◄───────────────────────────────│
+│ event: progress (33%) │
+│◄───────────────────────────────│
+│ event: progress (67%) │
+│◄───────────────────────────────│
+│ event: completed │
+│ { downloadUrl: "..." } │
+│◄───────────────────────────────│
+│ │
+│ Total: 2 HTTP requests only! │
+└────────────────────────────────────────────────────────────────────────────────┘
+
+````
 
 ---
 
@@ -181,7 +240,7 @@ Client                           Server
 {
   "file_ids": [12345, 67890, 11111]
 }
-```
+````
 
 **Response (202 Accepted):**
 
@@ -195,7 +254,7 @@ Client                           Server
 }
 ```
 
-#### GET /v1/download/status/:jobId - Check Status
+#### GET /v1/download/status/:jobId - Check Status (Polling)
 
 **Response (200 OK):**
 
@@ -225,6 +284,41 @@ Client                           Server
 }
 ```
 
+#### GET /v1/download/subscribe/:jobId - Real-time Updates (SSE)
+
+**Content-Type:** `text/event-stream`
+
+**SSE Events:**
+
+```
+event: connected
+data: {"jobId":"550e8400...","status":"queued","progress":0,"message":"Connected to job updates stream","timestamp":"2025-01-15T10:30:00.000Z"}
+
+event: progress
+data: {"jobId":"550e8400...","status":"processing","progress":33,"downloadUrl":null,"error":null,"timestamp":"2025-01-15T10:30:15.000Z"}
+
+event: progress
+data: {"jobId":"550e8400...","status":"processing","progress":67,"downloadUrl":null,"error":null,"timestamp":"2025-01-15T10:30:30.000Z"}
+
+event: completed
+data: {"jobId":"550e8400...","status":"ready","progress":100,"downloadUrl":"https://s3...","error":null,"timestamp":"2025-01-15T10:30:45.000Z"}
+
+event: heartbeat
+data: {"timestamp":"2025-01-15T10:30:15.000Z","jobId":"550e8400..."}
+```
+
+**Event Types:**
+
+| Event       | Description                        |
+| ----------- | ---------------------------------- |
+| `connected` | Initial connection established     |
+| `progress`  | Job progress update (0-100%)       |
+| `completed` | Job finished, includes downloadUrl |
+| `failed`    | Job failed, includes error message |
+| `heartbeat` | Keep-alive every 15s               |
+
+````
+
 ### 3.2 Job Status Schema
 
 ```typescript
@@ -240,7 +334,7 @@ interface Job {
 }
 
 type JobStatus = "queued" | "processing" | "ready" | "failed";
-```
+````
 
 ### 3.3 Queue System
 
@@ -321,21 +415,42 @@ if (job.attempts < MAX_RETRIES) {
 
 ### 4.1 Cloudflare Configuration
 
-Cloudflare has a default 100-second timeout. With our polling pattern, this is not an issue since:
+Cloudflare has a default 100-second timeout. With our hybrid pattern, this works well:
+
+**Polling endpoints** (no special config needed):
 
 - `/async` endpoint returns in <1 second
 - `/status` endpoint returns in <1 second
 
+**SSE endpoint** - Cloudflare supports SSE natively:
+
+- `/subscribe/:jobId` streams events over HTTP
+- SSE uses standard HTTP, no WebSocket upgrade needed
+- Cloudflare Pro+ supports 100s idle timeout (Free tier: 100s)
+
 **Recommended Cloudflare settings:**
 
 ```
-# Page Rules or Transform Rules
-# No special configuration needed for polling pattern
+# Page Rules (api.example.com/v1/download/*)
+Cache Level: Bypass
+Browser Cache TTL: Respect Existing Headers
+
+# For SSE endpoint specifically:
+# No special rules needed - SSE works over standard HTTP
 
 # Optional: Increase timeout for presigned S3 URLs
 # (if proxying S3 through Cloudflare)
 Proxy Timeout: 100s (default is fine)
+
+# WebSocket support (NOT needed for our SSE implementation)
+# WebSockets: OFF (we use SSE instead, which is simpler)
 ```
+
+**Note:** We chose SSE over WebSocket because:
+
+- SSE works through Cloudflare Free tier
+- No WebSocket upgrade complexity
+- Automatic reconnection built into EventSource API
 
 ### 4.2 Nginx Configuration
 
@@ -364,6 +479,24 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Request-ID $request_id;
+    }
+
+    # SSE endpoint - requires special settings for streaming
+    location /v1/download/subscribe/ {
+        proxy_pass http://api_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+
+        # SSE-specific settings
+        proxy_buffering off;           # Disable buffering for real-time streaming
+        proxy_cache off;               # Disable caching
+        proxy_read_timeout 300s;       # Allow long-lived SSE connections (5 min)
+        chunked_transfer_encoding on;  # Enable chunked encoding
+
+        # SSE content type handling
+        proxy_set_header Accept text/event-stream;
     }
 
     # Health check endpoint (no caching)
@@ -398,11 +531,11 @@ Listener:
 
 ## 5. Frontend Integration
 
-### 5.1 React Hook Implementation
+### 5.1 React Hook Implementation (Hybrid - SSE with Polling Fallback)
 
 ```typescript
 // hooks/useAsyncDownload.ts
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 
 interface DownloadState {
   jobId: string | null;
@@ -422,8 +555,9 @@ export function useAsyncDownload() {
   });
 
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
 
-  // Start download
+  // Start download with hybrid approach (SSE first, polling fallback)
   const startDownload = useCallback(async (fileIds: number[]) => {
     try {
       const response = await fetch("/api/v1/download/async", {
@@ -442,8 +576,12 @@ export function useAsyncDownload() {
         error: null,
       });
 
-      // Start polling
-      startPolling(data.jobId);
+      // Try SSE first (real-time), fall back to polling
+      if (typeof EventSource !== "undefined") {
+        startSSE(data.jobId);
+      } else {
+        startPolling(data.jobId);
+      }
     } catch (error) {
       setState((prev) => ({
         ...prev,
@@ -453,7 +591,59 @@ export function useAsyncDownload() {
     }
   }, []);
 
-  // Poll for status
+  // SSE for real-time updates (Option B)
+  const startSSE = useCallback((jobId: string) => {
+    const eventSource = new EventSource(`/api/v1/download/subscribe/${jobId}`);
+    eventSourceRef.current = eventSource;
+
+    eventSource.addEventListener("connected", (e) => {
+      const data = JSON.parse(e.data);
+      setState((prev) => ({
+        ...prev,
+        status: data.status,
+        progress: data.progress,
+      }));
+    });
+
+    eventSource.addEventListener("progress", (e) => {
+      const data = JSON.parse(e.data);
+      setState((prev) => ({
+        ...prev,
+        status: data.status,
+        progress: data.progress,
+      }));
+    });
+
+    eventSource.addEventListener("completed", (e) => {
+      const data = JSON.parse(e.data);
+      setState((prev) => ({
+        ...prev,
+        status: "ready",
+        progress: 100,
+        downloadUrl: data.downloadUrl,
+      }));
+      eventSource.close();
+    });
+
+    eventSource.addEventListener("failed", (e) => {
+      const data = JSON.parse(e.data);
+      setState((prev) => ({
+        ...prev,
+        status: "failed",
+        error: data.error,
+      }));
+      eventSource.close();
+    });
+
+    // Fallback to polling if SSE connection fails
+    eventSource.onerror = () => {
+      console.warn("SSE connection failed, falling back to polling");
+      eventSource.close();
+      startPolling(jobId);
+    };
+  }, []);
+
+  // Polling fallback (Option A)
   const startPolling = useCallback((jobId: string) => {
     const poll = async () => {
       try {
@@ -489,6 +679,9 @@ export function useAsyncDownload() {
     if (pollingRef.current) {
       clearTimeout(pollingRef.current);
     }
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+    }
     setState({
       jobId: null,
       status: "idle",
@@ -496,6 +689,14 @@ export function useAsyncDownload() {
       downloadUrl: null,
       error: null,
     });
+  }, []);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (pollingRef.current) clearTimeout(pollingRef.current);
+      if (eventSourceRef.current) eventSourceRef.current.close();
+    };
   }, []);
 
   return { ...state, startDownload, cancel };

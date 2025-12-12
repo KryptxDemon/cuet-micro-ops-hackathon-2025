@@ -1,18 +1,20 @@
 /**
- * Async Download Routes
+ * Async Download Routes - HYBRID PATTERN
  *
- * New endpoints for the async download system:
+ * Endpoints for the async download system:
  * - POST /v1/download/async   - Start async download job
- * - GET  /v1/download/status/:jobId - Poll job status
+ * - GET  /v1/download/status/:jobId - Poll job status (Polling Pattern)
+ * - GET  /v1/download/subscribe/:jobId - Real-time updates (SSE Pattern)
  * - GET  /v1/download/queue/stats   - Queue statistics
  *
- * These endpoints solve the HTTP timeout problem by:
- * 1. Immediately returning a jobId
- * 2. Processing in background
- * 3. Client polls status until ready
+ * HYBRID APPROACH:
+ * 1. Polling (Option A) - Simple HTTP polling for compatibility
+ * 2. SSE (Option B) - Real-time server-sent events for modern clients
+ * 3. Both work simultaneously - client chooses preferred method
  */
 
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
+import { streamSSE } from "hono/streaming";
 import { queueDownloadJob, getQueueStats } from "../jobs/downloadWorker.ts";
 import { jobStore } from "../utils/jobStore.ts";
 
@@ -157,6 +159,103 @@ asyncDownloadRoutes.openapi(asyncDownloadRoute, async (c) => {
   );
 });
 
+// ============== Batch Job Endpoint (OPTIMIZATION) ==============
+
+/**
+ * POST /v1/download/batch
+ * Create multiple download jobs at once
+ * OPTIMIZATION: Reduces API call overhead for multiple concurrent downloads
+ */
+const BatchDownloadRequestSchema = z
+  .object({
+    jobs: z
+      .array(
+        z.object({
+          file_ids: z
+            .array(z.number().int().min(10000).max(100000000))
+            .min(1)
+            .max(1000),
+        })
+      )
+      .min(1)
+      .max(10)
+      .openapi({ description: "Array of jobs to create (max 10)" }),
+  })
+  .openapi("BatchDownloadRequest");
+
+const BatchDownloadResponseSchema = z
+  .object({
+    jobs: z.array(
+      z.object({
+        jobId: z.string(),
+        status: z.string(),
+        totalFiles: z.number(),
+        statusUrl: z.string(),
+      })
+    ),
+    message: z.string(),
+  })
+  .openapi("BatchDownloadResponse");
+
+const batchDownloadRoute = createRoute({
+  method: "post",
+  path: "/v1/download/batch",
+  tags: ["Async Download"],
+  summary: "Create multiple download jobs at once",
+  description: `OPTIMIZATION: Create up to 10 download jobs in a single API call.
+    Reduces network overhead for concurrent downloads.
+    Returns array of jobIds for tracking.`,
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: BatchDownloadRequestSchema,
+        },
+      },
+    },
+  },
+  responses: {
+    202: {
+      description: "Jobs accepted and queued",
+      content: {
+        "application/json": {
+          schema: BatchDownloadResponseSchema,
+        },
+      },
+    },
+  },
+});
+
+asyncDownloadRoutes.openapi(batchDownloadRoute, async (c) => {
+  const { jobs: jobRequests } = c.req.valid("json");
+
+  // Create all jobs in parallel
+  const createdJobs = await Promise.all(
+    jobRequests.map(async (req) => {
+      const jobId = crypto.randomUUID();
+      await queueDownloadJob(jobId, req.file_ids);
+      return {
+        jobId,
+        status: "queued",
+        totalFiles: req.file_ids.length,
+        statusUrl: `/v1/download/status/${jobId}`,
+      };
+    })
+  );
+
+  console.log(
+    `[AsyncDownload] Batch: ${String(createdJobs.length)} jobs created`,
+  );
+
+  return c.json(
+    {
+      jobs: createdJobs,
+      message: `${String(createdJobs.length)} jobs queued successfully`,
+    },
+    202,
+  );
+});
+
 /**
  * GET /v1/download/status/:jobId
  * Poll job status
@@ -210,6 +309,15 @@ asyncDownloadRoutes.openapi(jobStatusRoute, (c) => {
     );
   }
 
+  // OPTIMIZATION: Add cache headers based on job status
+  // - Completed jobs: Cache for 1 hour (immutable)
+  // - In-progress jobs: Short cache (2 seconds) to reduce server load
+  if (job.status === "ready" || job.status === "failed") {
+    c.header("Cache-Control", "public, max-age=3600, immutable");
+  } else {
+    c.header("Cache-Control", "public, max-age=2");
+  }
+
   return c.json(
     {
       jobId: job.jobId,
@@ -260,6 +368,169 @@ asyncDownloadRoutes.openapi(queueStatsRoute, (c) => {
     },
     200,
   );
+});
+
+// ============== SSE Subscribe Endpoint (Hybrid Pattern) ==============
+
+/**
+ * GET /v1/download/subscribe/:jobId
+ * Server-Sent Events for real-time job updates
+ *
+ * This is the SSE part of our HYBRID approach:
+ * - Modern clients use this for real-time updates (no polling needed)
+ * - Legacy clients fall back to polling /status/:jobId
+ *
+ * SSE sends events:
+ * - "connected" - Initial connection established
+ * - "progress" - Job progress update (0-100%)
+ * - "completed" - Job finished, includes downloadUrl
+ * - "failed" - Job failed, includes error message
+ * - "heartbeat" - Keep-alive every 15s
+ */
+asyncDownloadRoutes.get("/v1/download/subscribe/:jobId", (c) => {
+  const jobId = c.req.param("jobId");
+
+  // Validate UUID format
+  const uuidRegex =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!uuidRegex.test(jobId)) {
+    return c.json({ error: "Invalid jobId format" }, 400);
+  }
+
+  // Check if job exists
+  const job = jobStore.getJob(jobId);
+  if (!job) {
+    return c.json({ error: "Job not found", jobId }, 404);
+  }
+
+  // If job is already complete, return immediately (no need for SSE)
+  if (job.status === "ready" || job.status === "failed") {
+    return c.json({
+      jobId: job.jobId,
+      status: job.status,
+      progress: job.progress,
+      downloadUrl: job.downloadUrl ?? null,
+      error: job.error ?? null,
+      message: "Job already completed. No SSE stream needed.",
+    });
+  }
+
+  console.log(`[SSE] Client subscribed to job ${jobId}`);
+
+  // Return SSE stream
+  return streamSSE(c, async (stream) => {
+    let isStreamActive = true;
+
+    // Send initial connected event with current state
+    await stream.writeSSE({
+      event: "connected",
+      data: JSON.stringify({
+        jobId: job.jobId,
+        status: job.status,
+        progress: job.progress,
+        message: "Connected to job updates stream",
+        timestamp: new Date().toISOString(),
+      }),
+    });
+
+    // Event handler for job updates (async inner function)
+    const processJobUpdate = async (event: {
+      type: string;
+      job: typeof job | undefined;
+    }): Promise<void> => {
+      if (!isStreamActive || !event.job) return;
+
+      try {
+        const eventData = {
+          jobId: event.job.jobId,
+          status: event.job.status,
+          progress: event.job.progress,
+          downloadUrl: event.job.downloadUrl ?? null,
+          error: event.job.error ?? null,
+          timestamp: new Date().toISOString(),
+        };
+
+        if (event.type === "updated") {
+          await stream.writeSSE({
+            event: "progress",
+            data: JSON.stringify(eventData),
+          });
+        } else if (event.type === "completed") {
+          await stream.writeSSE({
+            event: "completed",
+            data: JSON.stringify(eventData),
+          });
+          // Close stream after completion
+          isStreamActive = false;
+        } else if (event.type === "failed") {
+          await stream.writeSSE({
+            event: "failed",
+            data: JSON.stringify(eventData),
+          });
+          // Close stream after failure
+          isStreamActive = false;
+        }
+      } catch {
+        // Stream closed by client
+        isStreamActive = false;
+      }
+    };
+
+    // Synchronous wrapper to handle Promise properly (avoids @typescript-eslint/no-misused-promises)
+    const handleJobUpdate = (event: {
+      type: string;
+      job: typeof job | undefined;
+    }): void => {
+      void processJobUpdate(event);
+    };
+
+    // Subscribe to job events
+    jobStore.on(`job:${jobId}`, handleJobUpdate);
+
+    // Heartbeat to keep connection alive (every 15 seconds)
+    const sendHeartbeat = async (): Promise<void> => {
+      if (!isStreamActive) {
+        clearInterval(heartbeatInterval);
+        return;
+      }
+      try {
+        await stream.writeSSE({
+          event: "heartbeat",
+          data: JSON.stringify({
+            timestamp: new Date().toISOString(),
+            jobId,
+          }),
+        });
+      } catch {
+        isStreamActive = false;
+        clearInterval(heartbeatInterval);
+      }
+    };
+
+    const heartbeatInterval = setInterval(() => {
+      void sendHeartbeat();
+    }, 15000);
+
+    // Wait for stream to close or job to complete
+    // Using a simple polling approach to check if stream should close
+    while (isStreamActive) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+
+      // Check if job completed while we were waiting
+      const currentJob = jobStore.getJob(jobId);
+      if (
+        currentJob &&
+        (currentJob.status === "ready" || currentJob.status === "failed")
+      ) {
+        isStreamActive = false;
+      }
+    }
+
+    // Cleanup
+    clearInterval(heartbeatInterval);
+    jobStore.off(`job:${jobId}`, handleJobUpdate);
+    console.log(`[SSE] Client disconnected from job ${jobId}`);
+  });
 });
 
 export { asyncDownloadRoutes };

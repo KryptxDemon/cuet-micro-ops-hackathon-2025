@@ -157,6 +157,31 @@ services:
       - "4318:4318" # OTLP HTTP
     environment:
       - COLLECTOR_OTLP_ENABLED=true
+      - COLLECTOR_OTLP_HTTP_CORS_ALLOWED_ORIGINS=*
+      - COLLECTOR_OTLP_HTTP_CORS_ALLOWED_HEADERS=*
+    networks:
+      - delineate-network
+
+  # ===========================================
+  # Frontend - React Observability Dashboard
+  # ===========================================
+  delineate-frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile.dev
+    container_name: delineate-frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ../frontend/src:/app/src
+      - ../frontend/index.html:/app/index.html
+    environment:
+      - VITE_API_URL=http://localhost:3000
+      - VITE_JAEGER_URL=http://localhost:16686
+      - VITE_OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+    depends_on:
+      delineate-app:
+        condition: service_healthy
     networks:
       - delineate-network
 

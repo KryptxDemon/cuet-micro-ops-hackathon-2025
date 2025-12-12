@@ -232,7 +232,8 @@ class SimpleQueue extends EventEmitter {
 }
 
 // Export singleton instance
-export const downloadQueue = new SimpleQueue({ concurrency: 2, maxRetries: 3 });
+// Optimized: Increased concurrency from 2 to 5 for better throughput
+export const downloadQueue = new SimpleQueue({ concurrency: 5, maxRetries: 3 });
 
 // Export class for testing or creating additional queues
 export { SimpleQueue };

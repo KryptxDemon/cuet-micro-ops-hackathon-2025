@@ -110,11 +110,12 @@ app.use(
   cors({
     origin: env.CORS_ORIGINS,
     allowMethods: ["GET", "POST", "OPTIONS"],
-    allowHeaders: ["Content-Type", "Authorization", "X-Request-ID"],
+    allowHeaders: ["Content-Type", "Authorization", "X-Request-ID", "X-Trace-ID", "traceparent", "tracestate", "sentry-trace", "baggage"],
     exposeHeaders: [
       "X-Request-ID",
       "X-RateLimit-Limit",
       "X-RateLimit-Remaining",
+      "X-Trace-ID",
     ],
     maxAge: 86400,
   }),
