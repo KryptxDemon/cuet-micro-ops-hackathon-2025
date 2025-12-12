@@ -7,17 +7,24 @@
   "scripts": {
     "dev": "DOWNLOAD_DELAY_MIN_MS=5000 DOWNLOAD_DELAY_MAX_MS=15000 node --env-file=.env --experimental-transform-types --watch src/index.ts",
     "start": "DOWNLOAD_DELAY_MIN_MS=10000 DOWNLOAD_DELAY_MAX_MS=120000 node --env-file=.env --experimental-transform-types src/index.ts",
+    "worker": "node --experimental-transform-types src/worker.ts",
+    "worker:dev": "node --env-file=.env --experimental-transform-types --watch src/worker.ts",
     "lint": "eslint src",
     "lint:fix": "eslint src --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test:e2e": "node --experimental-transform-types scripts/run-e2e.ts",
     "docker:dev": "docker compose -f docker/compose.dev.yml up --build",
-    "docker:prod": "docker compose -f docker/compose.prod.yml up --build -d"
+    "docker:dev:detach": "docker compose -f docker/compose.dev.yml up --build -d",
+    "docker:prod": "docker compose -f docker/compose.prod.yml up --build -d",
+    "docker:down": "docker compose -f docker/compose.dev.yml down",
+    "docker:down:volumes": "docker compose -f docker/compose.dev.yml down -v",
+    "docker:logs": "docker compose -f docker/compose.dev.yml logs -f",
+    "docker:logs:api": "docker compose -f docker/compose.dev.yml logs -f delineate-app",
+    "docker:logs:worker": "docker compose -f docker/compose.dev.yml logs -f delineate-worker"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.948.0",
-    "@aws-sdk/s3-request-presigner": "^3.948.0",
     "@hono/node-server": "^1.19.6",
     "@hono/otel": "^1.0.1",
     "@hono/sentry": "^1.2.2",

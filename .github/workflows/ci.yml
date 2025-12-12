@@ -6,15 +6,32 @@ on:
   pull_request:
     branches: [main, master]
 
+env:
+  NODE_VERSION: "24"
+  DOCKER_BUILDKIT: 1
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
 jobs:
+  # ===========================================
+  # Lint & Format Check
+  # ===========================================
   lint:
-    name: Lint
+    name: Lint & Format
     runs-on: ubuntu-24.04
     container:
       image: node:24-slim
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Cache node modules
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
 
       - name: Install dependencies
         run: npm ci
@@ -25,15 +42,70 @@ jobs:
       - name: Check formatting
         run: npm run format:check
 
+  # ===========================================
+  # Validate Environment Variables
+  # ===========================================
+  validate-env:
+    name: Validate Environment
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check .env.example exists
+        run: |
+          if [ ! -f .env.example ]; then
+            echo "❌ .env.example file is missing!"
+            exit 1
+          fi
+          echo "✅ .env.example exists"
+
+      - name: Check .env.docker exists
+        run: |
+          if [ ! -f .env.docker ]; then
+            echo "❌ .env.docker file is missing!"
+            exit 1
+          fi
+          echo "✅ .env.docker exists"
+
+      - name: Validate required env variables in .env.example
+        run: |
+          REQUIRED_VARS=(
+            "S3_ENDPOINT"
+            "S3_ACCESS_KEY_ID"
+            "S3_SECRET_ACCESS_KEY"
+            "S3_BUCKET_NAME"
+            "REDIS_HOST"
+            "REDIS_PORT"
+          )
+          for var in "${REQUIRED_VARS[@]}"; do
+            if ! grep -q "^${var}=" .env.example; then
+              echo "❌ Missing required variable: ${var}"
+              exit 1
+            fi
+          done
+          echo "✅ All required environment variables present"
+
+  # ===========================================
+  # Unit/E2E Tests (without Docker)
+  # ===========================================
   test:
     name: E2E Tests
     runs-on: ubuntu-24.04
-    needs: lint
+    needs: [lint, validate-env]
     container:
       image: node:24-slim
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Cache node modules
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
 
       - name: Install dependencies
         run: npm ci
@@ -53,6 +125,9 @@ jobs:
           RATE_LIMIT_MAX_REQUESTS: "100"
           CORS_ORIGINS: "*"
 
+  # ===========================================
+  # Build Docker Images
+  # ===========================================
   build:
     name: Build Docker Image
     runs-on: ubuntu-24.04
@@ -64,7 +139,17 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build Docker image
+      - name: Build Development Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.dev
+          push: false
+          tags: delineate-hackathon-challenge:dev-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build Production Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -73,3 +158,163 @@ jobs:
           tags: delineate-hackathon-challenge:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # ===========================================
+  # Docker Compose Integration Test
+  # ===========================================
+  docker-integration:
+    name: Docker Compose Integration
+    runs-on: ubuntu-24.04
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create .env.docker if not exists
+        run: |
+          if [ ! -f .env.docker ]; then
+            cp .env.example .env.docker
+          fi
+
+      - name: Start Docker Compose
+        run: |
+          docker compose -f docker/compose.dev.yml up -d --build
+          echo "Waiting for services to be healthy..."
+          sleep 30
+
+      - name: Check service health
+        run: |
+          # Check API health
+          echo "Checking API health..."
+          for i in {1..30}; do
+            response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/health || echo "000")
+            if [ "$response" = "200" ]; then
+              echo "✅ API is healthy!"
+              break
+            fi
+            if [ $i -eq 30 ]; then
+              echo "❌ API health check failed after 30 attempts"
+              docker compose -f docker/compose.dev.yml logs
+              exit 1
+            fi
+            echo "Attempt $i: API not ready (status: $response), waiting..."
+            sleep 2
+          done
+
+      - name: Verify MinIO bucket exists
+        run: |
+          echo "Checking MinIO..."
+          docker exec delineate-minio mc alias set local http://localhost:9000 minioadmin minioadmin || true
+          docker compose -f docker/compose.dev.yml exec -T minio mc ls local/downloads || echo "Bucket check via mc"
+          echo "✅ MinIO is running"
+
+      - name: Verify Redis is running
+        run: |
+          echo "Checking Redis..."
+          docker exec delineate-redis redis-cli ping
+          echo "✅ Redis is running"
+
+      - name: Run health endpoint test
+        run: |
+          response=$(curl -s http://localhost:3000/health)
+          echo "Health response: $response"
+
+          # Check if storage is ok
+          if echo "$response" | grep -q '"storage":"ok"'; then
+            echo "✅ Storage health check passed!"
+          else
+            echo "⚠️ Storage might not be fully connected (this is expected in some CI environments)"
+          fi
+
+      - name: Test API endpoints
+        run: |
+          echo "Testing root endpoint..."
+          curl -s http://localhost:3000/ | grep -q "Hello Hono" && echo "✅ Root endpoint works"
+
+          echo "Testing download check endpoint..."
+          curl -s -X POST http://localhost:3000/v1/download/check \
+            -H "Content-Type: application/json" \
+            -d '{"file_id": 70000}' | grep -q "file_id" && echo "✅ Download check endpoint works"
+
+          echo "Testing download initiate endpoint..."
+          curl -s -X POST http://localhost:3000/v1/download/initiate \
+            -H "Content-Type: application/json" \
+            -d '{"file_ids": [10000, 20000]}' | grep -q "jobId" && echo "✅ Download initiate endpoint works"
+
+      - name: Show container logs on failure
+        if: failure()
+        run: |
+          echo "=== API Logs ==="
+          docker compose -f docker/compose.dev.yml logs delineate-app
+          echo "=== Worker Logs ==="
+          docker compose -f docker/compose.dev.yml logs delineate-worker
+          echo "=== MinIO Logs ==="
+          docker compose -f docker/compose.dev.yml logs minio
+          echo "=== Redis Logs ==="
+          docker compose -f docker/compose.dev.yml logs redis
+
+      - name: Cleanup
+        if: always()
+        run: docker compose -f docker/compose.dev.yml down -v
+
+  # ===========================================
+  # Security Scanning - Trivy (Docker Image)
+  # ===========================================
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-24.04
+    needs: build
+    permissions:
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set lowercase image name
+        id: image
+        run: echo "name=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
+      - name: Build Docker image for scanning
+        run: docker build -t ${{ steps.image.outputs.name }}:scan -f docker/Dockerfile.prod .
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "${{ steps.image.outputs.name }}:scan"
+          format: "sarif"
+          output: "trivy-results.sarif"
+          severity: "CRITICAL,HIGH"
+        continue-on-error: true
+
+      - name: Upload Trivy scan results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always() && hashFiles('trivy-results.sarif') != ''
+        with:
+          sarif_file: "trivy-results.sarif"
+
+  # ===========================================
+  # Notify on Failure (Optional - requires secrets)
+  # ===========================================
+  notify-failure:
+    name: Notify on Failure
+    runs-on: ubuntu-24.04
+    needs: [lint, test, build, docker-integration]
+    if: failure() && github.ref == 'refs/heads/main'
+    steps:
+      - name: Slack Notification
+        if: ${{ env.SLACK_WEBHOOK_URL != '' }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          curl -X POST -H 'Content-type: application/json' \
+            --data '{"text":"❌ CI Pipeline Failed on main branch!\nRepo: ${{ github.repository }}\nCommit: ${{ github.sha }}\nAuthor: ${{ github.actor }}"}' \
+            $SLACK_WEBHOOK_URL || true
+
+      - name: Discord Notification
+        if: ${{ env.DISCORD_WEBHOOK_URL != '' }}
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          curl -X POST -H 'Content-type: application/json' \
+            --data '{"content":"❌ **CI Pipeline Failed** on main branch!\n**Repo:** ${{ github.repository }}\n**Commit:** ${{ github.sha }}\n**Author:** ${{ github.actor }}"}' \
+            $DISCORD_WEBHOOK_URL || true

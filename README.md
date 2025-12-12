@@ -1,5 +1,9 @@
 # Delineate Hackathon Challenge - CUET Fest 2025
 
+![CI](https://github.com/bongodev/cuet-micro-ops-hackthon-2025/actions/workflows/ci.yml/badge.svg)
+![CodeQL](https://github.com/bongodev/cuet-micro-ops-hackthon-2025/actions/workflows/codeql.yml/badge.svg)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 ## The Scenario
 
 This microservice simulates a **real-world file download system** where processing times vary significantly:
@@ -512,6 +516,148 @@ curl -X POST http://localhost:3000/v1/download/start \
   -d '{"file_id": 70000}'
 ```
 
+---
+
+## 🚀 CI/CD Pipeline
+
+### Pipeline Status
+
+| Workflow        | Status                                                                                                     |
+| --------------- | ---------------------------------------------------------------------------------------------------------- |
+| CI Pipeline     | ![CI](https://github.com/bongodev/cuet-micro-ops-hackthon-2025/actions/workflows/ci.yml/badge.svg)         |
+| CodeQL Security | ![CodeQL](https://github.com/bongodev/cuet-micro-ops-hackthon-2025/actions/workflows/codeql.yml/badge.svg) |
+
+### Pipeline Stages
+
+```
+┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+│    Lint     │    │  Validate   │    │    Test     │    │    Build    │    │ Integration │
+│  & Format   │───▶│     Env     │───▶│   (E2E)     │───▶│   Docker    │───▶│    Test     │
+└─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
+                                                                                    │
+                                              ┌─────────────┐                       │
+                                              │  Security   │◀──────────────────────┘
+                                              │   Scan      │
+                                              └─────────────┘
+```
+
+### What Gets Tested
+
+| Stage             | Description                    | Command                    |
+| ----------------- | ------------------------------ | -------------------------- |
+| **Lint**          | ESLint code quality checks     | `npm run lint`             |
+| **Format**        | Prettier formatting check      | `npm run format:check`     |
+| **Validate Env**  | Required environment variables | Checks `.env.example`      |
+| **E2E Tests**     | End-to-end API tests           | `npm run test:e2e`         |
+| **Docker Build**  | Build dev & prod images        | `docker build`             |
+| **Integration**   | Full Docker Compose test       | Health checks + API tests  |
+| **Security Scan** | Trivy vulnerability scan       | Docker image scanning      |
+| **CodeQL**        | Static code analysis           | Security & quality queries |
+
+### Running Tests Locally
+
+Before pushing your changes, run all checks locally:
+
+```bash
+# Install dependencies
+npm install
+
+# Run linting
+npm run lint
+
+# Check formatting
+npm run format:check
+
+# Run E2E tests
+npm run test:e2e
+
+# Build Docker images
+docker compose -f docker/compose.dev.yml build
+
+# Run full integration test
+npm run docker:dev
+curl http://localhost:3000/health
+```
+
+### Branch Protection (Recommended)
+
+For maintainers, enable these branch protection rules on `main`:
+
+1. **Require pull request reviews** before merging
+2. **Require status checks** to pass:
+   - `Lint & Format`
+   - `E2E Tests`
+   - `Docker Compose Integration`
+3. **Require branches to be up to date** before merging
+4. **Include administrators** in restrictions
+
+### Adding Secrets (Optional)
+
+For notifications and deployments, add these secrets in GitHub Settings → Secrets → Actions:
+
+| Secret                | Purpose                          |
+| --------------------- | -------------------------------- |
+| `SLACK_WEBHOOK_URL`   | Slack notifications on failure   |
+| `DISCORD_WEBHOOK_URL` | Discord notifications on failure |
+| `DOCKER_USERNAME`     | Docker Hub push (if needed)      |
+| `DOCKER_PASSWORD`     | Docker Hub push (if needed)      |
+
+---
+
+## 🤝 Contributing
+
+### Quick Start for Contributors
+
+1. **Fork** the repository
+2. **Clone** your fork:
+   ```bash
+   git clone https://github.com/YOUR_USERNAME/cuet-micro-ops-hackthon-2025.git
+   cd cuet-micro-ops-hackthon-2025
+   ```
+3. **Install dependencies**:
+   ```bash
+   npm install
+   ```
+4. **Create a branch** for your feature:
+   ```bash
+   git checkout -b feature/your-feature-name
+   ```
+5. **Make your changes** and ensure all checks pass:
+   ```bash
+   npm run lint
+   npm run format:check
+   npm run test:e2e
+   ```
+6. **Commit** with a clear message:
+   ```bash
+   git commit -m "feat: add your feature description"
+   ```
+7. **Push** and create a Pull Request:
+   ```bash
+   git push origin feature/your-feature-name
+   ```
+
+### Commit Message Convention
+
+Use [Conventional Commits](https://www.conventionalcommits.org/):
+
+- `feat:` - New feature
+- `fix:` - Bug fix
+- `docs:` - Documentation changes
+- `chore:` - Maintenance tasks
+- `refactor:` - Code refactoring
+- `test:` - Adding/updating tests
+- `ci:` - CI/CD changes
+
+### Code Style
+
+- **ESLint** for code quality
+- **Prettier** for formatting
+- Run `npm run lint:fix` to auto-fix issues
+- Run `npm run format` to format code
+
+---
+
 ## Available Scripts
 
 ```bash
@@ -531,18 +677,23 @@ npm run docker:prod  # Start with Docker (production)
 ```
 .
 ├── src/
-│   └── index.ts          # Main application entry point
+│   ├── index.ts          # Main application entry point
+│   └── worker.ts         # Background job processor
 ├── scripts/
 │   ├── e2e-test.ts       # E2E test suite
 │   └── run-e2e.ts        # Test runner with server management
 ├── docker/
 │   ├── Dockerfile.dev    # Development Dockerfile
 │   ├── Dockerfile.prod   # Production Dockerfile
-│   ├── compose.dev.yml   # Development Docker Compose
+│   ├── compose.dev.yml   # Development Docker Compose (full stack)
 │   └── compose.prod.yml  # Production Docker Compose
 ├── .github/
 │   └── workflows/
-│       └── ci.yml        # GitHub Actions CI pipeline
+│       ├── ci.yml        # Main CI/CD pipeline
+│       └── codeql.yml    # Security analysis
+├── .env.example          # Environment template (local dev)
+├── .env.docker           # Docker environment config
+├── INFRASTRUCTURE.md     # Infrastructure documentation
 ├── package.json
 ├── tsconfig.json
 └── eslint.config.mjs

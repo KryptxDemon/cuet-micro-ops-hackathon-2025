@@ -10,4 +10,5 @@ COPY . .
 
 EXPOSE 3000
 
-CMD ["npm", "run", "dev"]
+# Use direct node command - env vars are passed via docker-compose
+CMD ["node", "--experimental-transform-types", "--watch", "src/index.ts"]
