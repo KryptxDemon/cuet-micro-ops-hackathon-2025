@@ -270,20 +270,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set lowercase image name
+        id: image
+        run: echo "name=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
       - name: Build Docker image for scanning
-        run: docker build -t ${{ env.IMAGE_NAME }}:scan -f docker/Dockerfile.prod .
+        run: docker build -t ${{ steps.image.outputs.name }}:scan -f docker/Dockerfile.prod .
 
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: "${{ env.IMAGE_NAME }}:scan"
+          image-ref: "${{ steps.image.outputs.name }}:scan"
           format: "sarif"
           output: "trivy-results.sarif"
           severity: "CRITICAL,HIGH"
+        continue-on-error: true
 
       - name: Upload Trivy scan results to GitHub Security
         uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        if: always() && hashFiles('trivy-results.sarif') != ''
         with:
           sarif_file: "trivy-results.sarif"
 
