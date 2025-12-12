@@ -14,6 +14,7 @@ import {
   Bug,
   Layers,
   Clock,
+  Timer,
   FileDown,
   Send,
   Trash2,
@@ -353,6 +354,25 @@ function DownloadJobs({ jobs, onInitiate, onClear }) {
     }
   };
 
+  // Get speed category based on elapsed time in seconds
+  const getSpeedCategory = (elapsedSeconds) => {
+    if (elapsedSeconds <= 15) {
+      return { label: 'Fast', color: 'text-green-500', bgColor: 'bg-green-500/10', borderColor: 'border-green-500/30', range: '10-15s' };
+    } else if (elapsedSeconds <= 60) {
+      return { label: 'Medium', color: 'text-yellow-500', bgColor: 'bg-yellow-500/10', borderColor: 'border-yellow-500/30', range: '30-60s' };
+    } else {
+      return { label: 'Slow', color: 'text-red-500', bgColor: 'bg-red-500/10', borderColor: 'border-red-500/30', range: '60-120s' };
+    }
+  };
+
+  // Calculate elapsed time in seconds
+  const getElapsedTime = (job) => {
+    if (job.startedAt && job.completedAt) {
+      return Math.round((new Date(job.completedAt) - new Date(job.startedAt)) / 1000);
+    }
+    return null;
+  };
+
   const getProgressPercentage = (job) => {
     // Use actual progress from async job if available
     if (job.progress !== undefined) {
@@ -440,9 +460,9 @@ function DownloadJobs({ jobs, onInitiate, onClear }) {
               placeholder="Enter file IDs (e.g., 10000, 10001, 10002)"
               className={`input flex-1 ${inputError ? 'border-red-500' : ''}`}
             />
-            <button type="submit" className="btn-primary">
-              <Send className="h-4 w-4 mr-2" />
-              Download
+            <button type="submit" className="btn-primary px-4 py-2 flex items-center gap-2 whitespace-nowrap">
+              <Download className="h-4 w-4" />
+              <span>Download</span>
             </button>
           </div>
           {inputError && (
@@ -467,6 +487,13 @@ function DownloadJobs({ jobs, onInitiate, onClear }) {
             Files 20001-20002
           </button>
           <button
+            onClick={() => onInitiate([30001])}
+            className="btn-outline btn-sm"
+          >
+            <Zap className="h-3 w-3 mr-1" />
+            File 30001
+          </button>
+          <button
             onClick={() => onInitiate([50000])}
             className="btn-ghost btn-sm text-muted-foreground"
           >
@@ -477,66 +504,79 @@ function DownloadJobs({ jobs, onInitiate, onClear }) {
         {/* Jobs List */}
         {jobs.length > 0 ? (
           <div className="space-y-2 max-h-64 overflow-y-auto scrollbar-thin">
-            {jobs.map((job) => (
-              <div
-                key={job.id}
-                className={`job-card rounded-lg border p-3 transition-all ${
-                  job.status === 'completed' || job.status === 'ready' ? 'border-green-500/30 bg-green-500/5' :
-                  job.status === 'failed' ? 'border-red-500/30 bg-red-500/5' :
-                  'border-border bg-muted/30'
-                }`}
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-3 flex-1 min-w-0">
-                    {job.status === 'pending' || job.status === 'checking' || job.status === 'downloading' || job.status === 'queued' || job.status === 'processing' ? (
-                      <Loader2 className="h-4 w-4 text-blue-500 animate-spin flex-shrink-0" />
-                    ) : job.status === 'completed' || job.status === 'ready' ? (
-                      <CheckCircle className="h-4 w-4 text-green-500 flex-shrink-0" />
-                    ) : (
-                      <XCircle className="h-4 w-4 text-red-500 flex-shrink-0" />
-                    )}
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium">
-                        {job.totalFiles > 1 ? `${job.totalFiles} Files` : `File #${job.fileId}`}
-                        {job.progress !== undefined && job.progress < 100 && (
-                          <span className="ml-2 text-xs text-muted-foreground">({job.progress}%)</span>
-                        )}
-                      </p>
-                      {job.error ? (
-                        <p className="text-xs text-red-500 truncate">{job.error}</p>
-                      ) : job.downloadUrl ? (
-                        <a
-                          href={job.downloadUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-xs text-blue-500 hover:underline flex items-center gap-1"
-                        >
-                          Download ready <ExternalLink className="h-3 w-3" />
-                        </a>
-                      ) : job.serverJobId ? (
-                        <p className="text-xs text-muted-foreground">
-                          Job: {job.serverJobId.slice(0, 8)}...
-                        </p>
+            {jobs.map((job) => {
+              const elapsedTime = getElapsedTime(job);
+              const speedCategory = elapsedTime !== null ? getSpeedCategory(elapsedTime) : null;
+              
+              return (
+                <div
+                  key={job.id}
+                  className={`job-card rounded-lg border p-3 transition-all ${
+                    job.status === 'completed' || job.status === 'ready' ? 'border-green-500/30 bg-green-500/5' :
+                    job.status === 'failed' ? 'border-red-500/30 bg-red-500/5' :
+                    'border-border bg-muted/30'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      {job.status === 'pending' || job.status === 'checking' || job.status === 'downloading' || job.status === 'queued' || job.status === 'processing' ? (
+                        <Loader2 className="h-4 w-4 text-blue-500 animate-spin flex-shrink-0" />
+                      ) : job.status === 'completed' || job.status === 'ready' ? (
+                        <CheckCircle className="h-4 w-4 text-green-500 flex-shrink-0" />
                       ) : (
-                        <p className="text-xs text-muted-foreground">
-                          {job.traceId && `Trace: ${job.traceId.slice(0, 8)}...`}
-                        </p>
+                        <XCircle className="h-4 w-4 text-red-500 flex-shrink-0" />
                       )}
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium">
+                          {job.totalFiles > 1 ? `${job.totalFiles} Files` : `File #${job.fileId}`}
+                          {job.progress !== undefined && job.progress < 100 && (
+                            <span className="ml-2 text-xs text-muted-foreground">({job.progress}%)</span>
+                          )}
+                        </p>
+                        {job.error ? (
+                          <p className="text-xs text-red-500 truncate">{job.error}</p>
+                        ) : job.downloadUrl ? (
+                          <a
+                            href={job.downloadUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs text-blue-500 hover:underline flex items-center gap-1"
+                          >
+                            Download ready <ExternalLink className="h-3 w-3" />
+                          </a>
+                        ) : job.serverJobId ? (
+                          <p className="text-xs text-muted-foreground">
+                            Job: {job.serverJobId.slice(0, 8)}...
+                          </p>
+                        ) : (
+                          <p className="text-xs text-muted-foreground">
+                            {job.traceId && `Trace: ${job.traceId.slice(0, 8)}...`}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {/* Show speed category after completion */}
+                      {(job.status === 'completed' || job.status === 'ready') && speedCategory && (
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full ${speedCategory.bgColor} ${speedCategory.borderColor} border ${speedCategory.color} font-medium`}>
+                          {speedCategory.label} • {elapsedTime}s
+                        </span>
+                      )}
+                      {getStatusBadge(job.status)}
                     </div>
                   </div>
-                  {getStatusBadge(job.status)}
+                  {/* Progress Bar */}
+                  {(job.status === 'pending' || job.status === 'checking' || job.status === 'downloading' || job.status === 'queued' || job.status === 'processing') && (
+                    <div className="progress-bar mt-2">
+                      <div 
+                        className="progress-bar-fill transition-all duration-300" 
+                        style={{ width: `${getProgressPercentage(job)}%` }}
+                      />
+                    </div>
+                  )}
                 </div>
-                {/* Progress Bar */}
-                {(job.status === 'pending' || job.status === 'checking' || job.status === 'downloading' || job.status === 'queued' || job.status === 'processing') && (
-                  <div className="progress-bar mt-2">
-                    <div 
-                      className="progress-bar-fill transition-all duration-300" 
-                      style={{ width: `${getProgressPercentage(job)}%` }}
-                    />
-                  </div>
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <div className="text-center py-8">
@@ -637,30 +677,46 @@ function ErrorLog({ errors, onClear, onTriggerError }) {
 // ============================================================================
 
 function TraceViewer({ currentTraceId, jaegerUrl }) {
+  const copyTraceId = () => {
+    if (currentTraceId) {
+      navigator.clipboard.writeText(currentTraceId);
+    }
+  };
+
   return (
-    <div className="card animate-fade-in">
+    <div className="card animate-fade-in h-full flex flex-col">
       <div className="card-header">
         <h3 className="text-sm font-medium flex items-center gap-2">
-          <Layers className="h-4 w-4" />
+          <Layers className="h-4 w-4 text-purple-500" />
           Distributed Tracing
         </h3>
       </div>
-      <div className="card-content space-y-4">
+      <div className="card-content space-y-4 flex-1 flex flex-col">
         {/* Current Trace */}
-        <div className="p-3 rounded-md bg-muted/50">
-          <p className="text-xs text-muted-foreground mb-1">Current Trace ID</p>
-          <p className="font-mono text-sm break-all">
-            {currentTraceId || 'No active trace'}
+        <div className="p-3 rounded-md bg-muted/50 border border-border">
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-xs text-muted-foreground font-medium">Current Trace ID</p>
+            {currentTraceId && (
+              <button 
+                onClick={copyTraceId}
+                className="text-xs text-blue-500 hover:text-blue-400 transition-colors"
+              >
+                Copy
+              </button>
+            )}
+          </div>
+          <p className="font-mono text-xs break-all leading-relaxed">
+            {currentTraceId || <span className="text-muted-foreground italic">No active trace</span>}
           </p>
         </div>
 
-        {/* Jaeger Link */}
-        <div className="space-y-2">
+        {/* Jaeger Links */}
+        <div className="space-y-2 flex-1">
           <a
             href={jaegerUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="btn-primary w-full"
+            className="btn-primary w-full justify-center"
           >
             <ExternalLink className="h-4 w-4 mr-2" />
             Open Jaeger UI
@@ -671,7 +727,7 @@ function TraceViewer({ currentTraceId, jaegerUrl }) {
               href={`${jaegerUrl}/trace/${currentTraceId}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="btn-outline w-full"
+              className="btn-outline w-full justify-center"
             >
               <Activity className="h-4 w-4 mr-2" />
               View Current Trace
@@ -680,10 +736,10 @@ function TraceViewer({ currentTraceId, jaegerUrl }) {
         </div>
 
         {/* Info */}
-        <div className="text-xs text-muted-foreground">
-          <p>Traces are sent to Jaeger via OpenTelemetry.</p>
-          <p className="mt-1">
-            Each API call creates a trace that can be viewed in the Jaeger UI.
+        <div className="text-xs text-muted-foreground bg-muted/30 p-2 rounded-md mt-auto">
+          <p className="flex items-center gap-1">
+            <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+            Traces sent via OpenTelemetry to Jaeger
           </p>
         </div>
       </div>
