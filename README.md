@@ -1,7 +1,7 @@
 # Delineate Hackathon Challenge - CUET Fest 2025
 
-![CI](https://github.com/bongodev/cuet-micro-ops-hackthon-2025/actions/workflows/ci.yml/badge.svg)
-![CodeQL](https://github.com/bongodev/cuet-micro-ops-hackthon-2025/actions/workflows/codeql.yml/badge.svg)
+![CI](https://github.com/KryptxDemon/cuet-micro-ops-hackathon-2025/actions/workflows/ci.yml/badge.svg)
+![CodeQL](https://github.com/KryptxDemon/cuet-micro-ops-hackathon-2025/actions/workflows/codeql.yml/badge.svg)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## The Scenario
@@ -522,10 +522,10 @@ curl -X POST http://localhost:3000/v1/download/start \
 
 ### Pipeline Status
 
-| Workflow        | Status                                                                                                     |
-| --------------- | ---------------------------------------------------------------------------------------------------------- |
-| CI Pipeline     | ![CI](https://github.com/bongodev/cuet-micro-ops-hackthon-2025/actions/workflows/ci.yml/badge.svg)         |
-| CodeQL Security | ![CodeQL](https://github.com/bongodev/cuet-micro-ops-hackthon-2025/actions/workflows/codeql.yml/badge.svg) |
+| Workflow        | Status                                                                                                        |
+| --------------- | ------------------------------------------------------------------------------------------------------------- |
+| CI Pipeline     | ![CI](https://github.com/KryptxDemon/cuet-micro-ops-hackathon-2025/actions/workflows/ci.yml/badge.svg)       |
+| CodeQL Security | ![CodeQL](https://github.com/KryptxDemon/cuet-micro-ops-hackathon-2025/actions/workflows/codeql.yml/badge.svg) |
 
 ### Pipeline Stages
 
@@ -536,23 +536,38 @@ curl -X POST http://localhost:3000/v1/download/start \
 └─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
                                                                                     │
                                               ┌─────────────┐                       │
+                                              │ Dependency  │◀──────────────────────┤
+                                              │    Scan     │                       │
+                                              └─────────────┘                       │
+                                                     │                              │
+                                              ┌─────────────┐                       │
                                               │  Security   │◀──────────────────────┘
                                               │   Scan      │
+                                              └─────────────┘
+                                                     │
+                                                     │ (main branch only)
+                                                     ▼
+                                              ┌─────────────┐
+                                              │   Deploy    │
+                                              │  Railway/   │
+                                              │   Render    │
                                               └─────────────┘
 ```
 
 ### What Gets Tested
 
-| Stage             | Description                    | Command                    |
-| ----------------- | ------------------------------ | -------------------------- |
-| **Lint**          | ESLint code quality checks     | `npm run lint`             |
-| **Format**        | Prettier formatting check      | `npm run format:check`     |
-| **Validate Env**  | Required environment variables | Checks `.env.example`      |
-| **E2E Tests**     | End-to-end API tests           | `npm run test:e2e`         |
-| **Docker Build**  | Build dev & prod images        | `docker build`             |
-| **Integration**   | Full Docker Compose test       | Health checks + API tests  |
-| **Security Scan** | Trivy vulnerability scan       | Docker image scanning      |
-| **CodeQL**        | Static code analysis           | Security & quality queries |
+| Stage               | Description                    | Command                    |
+| ------------------- | ------------------------------ | -------------------------- |
+| **Lint**            | ESLint code quality checks     | `npm run lint`             |
+| **Format**          | Prettier formatting check      | `npm run format:check`     |
+| **Validate Env**    | Required environment variables | Checks `.env.example`      |
+| **E2E Tests**       | End-to-end API tests           | `npm run test:e2e`         |
+| **Docker Build**    | Build dev & prod images        | `docker build`             |
+| **Integration**     | Full Docker Compose test       | Health checks + API tests  |
+| **Dependency Scan** | npm audit vulnerability check  | `npm audit`                |
+| **Security Scan**   | Trivy vulnerability scan       | Docker image scanning      |
+| **CodeQL**          | Static code analysis           | Security & quality queries |
+| **Deploy**          | Railway/Render deployment      | API calls (main only)      |
 
 ### Running Tests Locally
 
@@ -591,16 +606,52 @@ For maintainers, enable these branch protection rules on `main`:
 3. **Require branches to be up to date** before merging
 4. **Include administrators** in restrictions
 
-### Adding Secrets (Optional)
+### Setting Up GitHub Secrets
 
-For notifications and deployments, add these secrets in GitHub Settings → Secrets → Actions:
+To enable deployment and notifications, add these secrets in **GitHub Settings → Secrets and variables → Actions**:
+
+#### Deployment Secrets (Choose One Platform)
+
+**Option 1: Railway Deployment**
+| Secret                  | Purpose                    | How to Obtain                                                                     |
+| ----------------------- | -------------------------- | --------------------------------------------------------------------------------- |
+| `RAILWAY_API_KEY`       | Railway authentication     | [Railway Dashboard](https://railway.app/account/tokens) → Generate new token     |
+| `RAILWAY_PROJECT_ID`    | Your Railway project ID    | Railway project URL: `railway.app/project/{PROJECT_ID}`                           |
+| `RAILWAY_SERVICE_ID`    | Your Railway service ID    | Railway service settings → Copy service ID                                        |
+
+**Option 2: Render Deployment**
+| Secret               | Purpose                 | How to Obtain                                                                        |
+| -------------------- | ----------------------- | ------------------------------------------------------------------------------------ |
+| `RENDER_API_KEY`     | Render authentication   | [Render Dashboard](https://dashboard.render.com/account/settings) → API Keys        |
+| `RENDER_SERVICE_ID`  | Your Render service ID  | Render service settings → Deploy Hook URL contains the service ID                    |
+
+#### Optional Notification Secrets
 
 | Secret                | Purpose                          |
 | --------------------- | -------------------------------- |
 | `SLACK_WEBHOOK_URL`   | Slack notifications on failure   |
 | `DISCORD_WEBHOOK_URL` | Discord notifications on failure |
-| `DOCKER_USERNAME`     | Docker Hub push (if needed)      |
-| `DOCKER_PASSWORD`     | Docker Hub push (if needed)      |
+
+### Deployment Process
+
+The CI/CD pipeline automatically deploys to production when:
+- ✅ All tests pass (lint, format, E2E tests)
+- ✅ Docker builds successfully
+- ✅ Security scans complete
+- ✅ Push is to the `main` or `master` branch
+
+**Manual Deployment:**
+You can trigger a manual deployment by:
+1. Go to **Actions** tab in GitHub
+2. Select **CI** workflow
+3. Click **Run workflow**
+4. Select `main` branch
+5. Click **Run workflow**
+
+**Deployment Status:**
+- Check the **Actions** tab for deployment logs
+- Deployment summary is shown in the job output
+- Failed deployments will trigger notifications (if configured)
 
 ---
 
